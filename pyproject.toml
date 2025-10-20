@@ -1,0 +1,25 @@
+[project]
+name = "ocfapi"
+version = "0.1.0"
+description = "OpenCTI Connectors Fake APIs for connectors development and testing."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "factory-boy>=3.3.3",
+    "fastapi>=0.119.0",
+    "httpx>=0.28.1",
+    "pytest>=8.4.2",
+    "ruff>=0.14.0",
+    "uvicorn>=0.37.0",
+]
+
+[tool.ruff]
+line-length = 79
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "tab"
+docstring-code-format = true

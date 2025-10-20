@@ -1,0 +1,17 @@
+# Test your endpoints
+
+GET http://127.0.0.1:8000/hunt-io/feeds/c2
+Accept: application/gzip
+
+> {%
+  client.test("Request executed successfully", function () {
+    client.assert(response.status === 200, "Response status is not 200");
+  });
+
+  client.test("Response content-type is gzip", function () {
+    const type = response.contentType.mimeType;
+    client.assert(type === "application/gzip", `Expected 'application/gzip' but received '${type}'`);
+  });
+%}
+
+###
