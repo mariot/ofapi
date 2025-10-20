@@ -3,6 +3,13 @@ from dataclasses import dataclass, asdict
 import factory
 
 
+def _remove_private_attributes(data_dict: dict) -> dict:
+    """
+    Removes keys starting with an underscore from a dictionary.
+    """
+    return {key: value for key, value in data_dict.items() if not key.startswith("_")}
+
+
 @dataclass
 class StixItem:
     _internal_id: str
@@ -28,6 +35,8 @@ class Ipv4Addr(StixItem):
 
 @dataclass
 class StixItemWithDates(StixItem):
+    _created: str
+    _modified: str
     created: str
     modified: str
 
@@ -36,6 +45,7 @@ class Indicator(StixItemWithDates):
     _file_hash: str
     pattern: str
     name: str
+    _valid_from: str
     valid_from: str
     pattern_type: str = "stix"
     pattern_version: str = "2.1"
@@ -60,6 +70,7 @@ class Malware(StixItemWithDates):
 class Report(StixItemWithDates):
     name: str
     description: str
+    _published: str
     published: str
     object_refs: list[StixItem]
     external_references: list[Source]
@@ -71,21 +82,18 @@ class Bundle(StixItem):
     reports: list[Report]
 
     def to_dict(self):
-        bundle = asdict(self)
+        bundle = _remove_private_attributes(asdict(self))
         reports = self.reports
         bundle.pop("reports")
-        bundle.pop("_internal_id")
         bundle.pop("spec_version")
         bundle["objects"] = []
         for report in reports:
-            report = asdict(report)
-            report.pop("_internal_id")
+            report = _remove_private_attributes(asdict(report))
             object_refs = report.pop("object_refs")
             report["object_refs"] = [obj["id"] for obj in object_refs]
             bundle["objects"].append(report)
             for linked_obj in object_refs:
-                linked_obj.pop("_internal_id")
-                bundle["objects"].append(linked_obj)
+                bundle["objects"].append(_remove_private_attributes(linked_obj))
         return bundle
 
 class StixItemFactory(factory.Factory):
@@ -123,8 +131,10 @@ class StixItemFactoryWithDates(StixItemFactory):
     class Meta:
         model = StixItemWithDates
 
-    created = factory.Faker("iso8601")
-    modified = factory.Faker("iso8601")
+    _created = factory.Faker("iso8601")
+    _modified = factory.Faker("iso8601")
+    created = factory.LazyAttribute(lambda o: f"{o._created}Z")
+    modified = factory.LazyAttribute(lambda o: f"{o._modified}Z")
 
 
 class IndicatorFactory(StixItemFactoryWithDates):
@@ -135,7 +145,8 @@ class IndicatorFactory(StixItemFactoryWithDates):
     type = "indicator"
     pattern = factory.LazyAttribute(lambda o: f"[file:hashes.MD5 = '{o._file_hash}']")
     name = "Hash"
-    valid_from = factory.Faker("iso8601")
+    _valid_from = factory.Faker("iso8601")
+    valid_from = factory.LazyAttribute(lambda o: f"{o._valid_from}Z")
 
 
 class SourceFactory(factory.Factory):
@@ -164,7 +175,8 @@ class ReportFactory(StixItemFactoryWithDates):
     type = "report"
     name = factory.Faker("sentence", nb_words=6)
     description = factory.Faker("paragraph")
-    published = factory.Faker("iso8601")
+    _published = factory.Faker("iso8601")
+    published = factory.LazyAttribute(lambda o: f"{o._published}Z")
     external_references = factory.List([factory.SubFactory(SourceFactory) for _ in range(2)])
     object_refs = factory.List(
         [
