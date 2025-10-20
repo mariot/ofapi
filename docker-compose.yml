@@ -1,0 +1,22 @@
+services:
+  ofapi:
+    container_name: ofapi
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    # Mounts the local "app" directory into the container so code changes are reflected without rebuild
+    volumes:
+      - ./app:/code/app
+
+    # Maps the container port 8000 to the host machine port defined by APP_PORT
+    # If APP_PORT is not set, it defaults to 8000
+    ports:
+      - "${APP_PORT:-8000}:80"
+
+    networks:
+      - opencti-network
+
+networks:
+  opencti-network:
+    external: true
