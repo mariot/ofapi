@@ -1,4 +1,4 @@
-from api.hunt_io import (
+from app.api.hunt_io import (
     Malware,
     C2Feed,
     C2FeedExtraFactory,

@@ -5,8 +5,8 @@ from typing import Annotated
 
 from fastapi import FastAPI, Query
 from fastapi.responses import StreamingResponse
-from api.hunt_io import C2FeedFactory
-from api.feedly import BundleFactory
+from app.api.hunt_io import C2FeedFactory
+from app.api.feedly import BundleFactory
 
 app = FastAPI()
 

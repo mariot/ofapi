@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
-from api.feedly import (
+from app.api.feedly import (
     BundleFactory,
 )
-from main import app
+from app.main import app
 
 client = TestClient(app)
 
