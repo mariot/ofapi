@@ -24,8 +24,8 @@ Follow these steps to set up the project locally.
 1.  **Clone the repository:**
 
     ```bash
-    git clone <your-repository-url>
-    cd <your-project-directory>
+    git clone git@github.com:mariot/ofapi.git
+    cd ofapi
     ```
 
 2.  **Build and run with Docker:** Use Docker to build and run the application.
