@@ -15,3 +15,6 @@ Accept: application/gzip
 %}
 
 ###
+
+GET http://127.0.0.1:8000/feedly/v3/enterprise/ioc?streamId=test&newerThan=today
+Accept: application/json
