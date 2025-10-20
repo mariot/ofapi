@@ -1,18 +1,23 @@
 FROM python:3.14-slim
 
 ENV UV_COMPILE_BYTECODE=1
+ENV UV_NO_EDITABLE=1
+ENV UV_FROZEN=1
+ENV UV_WORKING_DIRECTORY=/code
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 
 # Install uv.
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
-# Copy the application into the container.
-COPY . /app
+WORKDIR /code
 
 # Install the application dependencies.
-WORKDIR /app
-RUN uv sync --frozen --no-cache --no-editable
+COPY ./pyproject.toml /code/pyproject.toml
+COPY ./uv.lock /code/uv.lock
+RUN uv sync --no-dev --no-cache
+
+# Copy the application into the container.
+COPY ./app /code/app
 
 # Run the application.
-CMD ["/app/.venv/bin/fastapi", "run", "app/main.py", "--port", "80", "--host", "0.0.0.0"]
+CMD ["/code/.venv/bin/fastapi", "run", "app/main.py", "--port", "80", "--host", "0.0.0.0"]

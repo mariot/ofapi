@@ -5,12 +5,9 @@ description = "OpenCTI Connectors Fake APIs for connectors development and testi
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "fastapi[standard-no-fastapi-cloud-cli]==0.119.1",
     "factory-boy==3.3.3",
-    "fastapi[standard]==0.119.1",
     "httpx==0.28.1",
-    "pytest==8.4.2",
-    "ruff==0.14.1",
-    "uvicorn==0.38.0",
 ]
 
 [tool.ruff]
@@ -23,3 +20,9 @@ convention = "google"
 quote-style = "single"
 indent-style = "tab"
 docstring-code-format = true
+
+[dependency-groups]
+dev = [
+    "pytest==8.4.2",
+    "ruff==0.14.1"
+]
