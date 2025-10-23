@@ -33,7 +33,6 @@ convention = "google"
 
 [tool.ruff.format]
 quote-style = "double"
-indent-style = "tab"
 line-ending = "auto"
 docstring-code-format = true
 
