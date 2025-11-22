@@ -4,18 +4,32 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-
-    # Mounts the local "app" directory into the container so code changes are reflected without rebuild
+    # Mounts the local "app" directory into the container so code changes are reflected without rebuilding
     volumes:
       - ./app:/code/app
-
     # Maps the container port 8000 to the host machine port defined by APP_PORT
     # If APP_PORT is not set, it defaults to 8000
     ports:
       - "${APP_PORT:-8000}:80"
-
     networks:
       - opencti-network
+
+    develop:
+      # Create a `watch` configuration to update the app
+      # https://docs.docker.com/compose/file-watch/#compose-watch-versus-bind-mounts
+      watch:
+        # Sync the working directory with the `/app` directory in the container
+        - action: sync
+          path: ./app
+          target: /code/app
+          # Exclude the project virtual environment — it could be for a
+          # different platform in the container
+          ignore:
+            - .venv/
+
+        # Rebuild the image if dependencies change by checking uv.lock
+        - action: rebuild
+          path: ./uv.lock
 
 networks:
   opencti-network:
