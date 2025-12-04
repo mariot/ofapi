@@ -5,10 +5,15 @@ from dataclasses import asdict
 from typing import Annotated
 
 import fastapi
+from censys_platform import (
+    HostAsset,
+    ResponseEnvelopeHostAsset,
+)
 from fastapi import FastAPI, File, Form, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.api.censys import HostFactory
 from app.api.feedly import BundleFactory
 from app.api.hunt_io import C2FeedFactory
 from app.api.proofpoint_tap import CampaignDetailFactory, CampaignFactory
@@ -227,3 +232,29 @@ async def reversinglabs_spectra_analyze_samples_list_details(
             remove_private_attributes(asdict(ReportIntelligenceResponseFactory()))
         ],
     }
+
+
+@app.get(
+    "/censys/v3/global/asset/host/{host_id}",
+    tags=["Censys Platform"],
+)
+async def censys_platform_global_asset_host(host_id: str):
+    """Censys Platform Global Asset Host Endpoint
+
+    Returns a sample response for Censys Platform global asset host."""
+
+    class ResponseModel(ResponseEnvelopeHostAsset):
+        headers: dict
+
+    host = HostFactory(id=host_id)
+    result = ResponseModel(
+        headers={},
+        result=HostAsset(
+            extensions={},
+            resource=host,
+        ),
+    )
+    return fastapi.Response(
+        content=result.model_dump_json(),
+        media_type="application/vnd.censys.api.v3.host.v1+json",
+    )
