@@ -15,9 +15,9 @@ anyio==4.11.0 \
     #   httpx
     #   starlette
     #   watchfiles
-censys-platform==0.11.0 \
-    --hash=sha256:1e3534fb2df798f15785f16ad079529f4f9faf4263bd3f8cf9bd15f5f623080f \
-    --hash=sha256:4b4137ba88f0a9286330f24f2fe649c90086af3b9ee6decbc1ee748eea39d6ce
+censys-platform==0.12.1 \
+    --hash=sha256:5d78557d036f6c670a0efca9d725af243834e1fb8af402f48b13d174fd6bcc34 \
+    --hash=sha256:7c67c4301b684768c9b8957c1df8dcfae4eafbd6fa629c2627b93026ccb23674
     # via ofapi
 certifi==2025.10.5 \
     --hash=sha256:0f212c2744a9bb6de0c56639a6f68afe01ecd92d91f14ae897c4fe7bbeeef0de \
@@ -63,9 +63,9 @@ faker==37.11.0 \
     --hash=sha256:1508d2da94dfd1e0087b36f386126d84f8583b3de19ac18e392a2831a6676c57 \
     --hash=sha256:22969803849ba0618be8eee2dd01d0d9e2cd3b75e6ff1a291fa9abcdb34da5e6
     # via factory-boy
-fastapi==0.123.7 \
-    --hash=sha256:31116d87ce36b66c3e853f8c0ba7c3e4b57c148abb0e72547e25257526cd2cc5 \
-    --hash=sha256:d401701383afcf59bd859ead4fadd9e5aab5f783884d6a3ebe296012fdd53ab2
+fastapi==0.128.0 \
+    --hash=sha256:1cc179e1cef10a6be60ffe429f79b829dce99d8de32d7acb7e6c8dfdf7f2645a \
+    --hash=sha256:aebd93f9716ee3b4f4fcfe13ffb7cf308d99c9f3ab5622d8877441072561582d
     # via ofapi
 fastapi-cli==0.0.13 \
     --hash=sha256:219b73ccfde7622559cef1d43197da928516acb4f21f2ec69128c4b90057baba \
@@ -182,6 +182,8 @@ pydantic==2.12.5 \
     #   censys-platform
     #   fastapi
     #   ofapi
+    #   pydantic-extra-types
+    #   pydantic-settings
 pydantic-core==2.41.5 \
     --hash=sha256:0177272f88ab8312479336e1d777f6b124537d47f2123f89cb37e0accea97f90 \
     --hash=sha256:08daa51ea16ad373ffd5e7606252cc32f07bc72b28284b6bc9c6df804816476e \
@@ -213,6 +215,14 @@ pydantic-core==2.41.5 \
     --hash=sha256:e56ba91f47764cc14f1daacd723e3e82d1a89d783f0f5afe9c364b8bb491ccdb \
     --hash=sha256:e672ba74fbc2dc8eea59fb6d4aed6845e6905fc2a8afe93175d94a83ba2a01a0
     # via pydantic
+pydantic-extra-types==2.11.0 \
+    --hash=sha256:4e9991959d045b75feb775683437a97991d02c138e00b59176571db9ce634f0e \
+    --hash=sha256:84b864d250a0fc62535b7ec591e36f2c5b4d1325fa0017eb8cda9aeb63b374a6
+    # via fastapi
+pydantic-settings==2.12.0 \
+    --hash=sha256:005538ef951e3c2a68e1c08b292b5f2e71490def8589d4221b95dab00dafcfd0 \
+    --hash=sha256:fddb9fd99a5b18da837b29710391e945b1e30c135477f484084ee513adb93809
+    # via fastapi
 pygments==2.19.2 \
     --hash=sha256:636cb2477cec7f8952536970bc533bc43743542f70392ae026374600add5b887 \
     --hash=sha256:86540386c03d588bb81d44bc3928634ff26449851e99741617ecb9037ee5ec0b
@@ -225,10 +235,12 @@ pytest==9.0.1 \
 python-dotenv==1.1.1 \
     --hash=sha256:31f23644fe2602f88ff55e1f5c79ba497e01224ee7737937930c448e4d0e24dc \
     --hash=sha256:a8a6399716257f45be6a007360200409fce5cda2661e3dec71d23dc15f6189ab
-    # via uvicorn
-python-multipart==0.0.20 \
-    --hash=sha256:8a62d3a8335e06589fe01f2a3e178cdcc632f3fbe0d492ad9ee0ec35aab1f104 \
-    --hash=sha256:8dd0cab45b8e23064ae09147625994d090fa46f5b0d1e13af944c331a7fa9d13
+    # via
+    #   pydantic-settings
+    #   uvicorn
+python-multipart==0.0.21 \
+    --hash=sha256:7137ebd4d3bbf70ea1622998f902b97a29434a9e8dc40eb203bbcf7c2a2cba92 \
+    --hash=sha256:cf7a6713e01c87aa35387f4774e812c4361150938d20d232800f75ffcf266090
     # via
     #   fastapi
     #   ofapi
@@ -308,13 +320,16 @@ typing-extensions==4.15.0 \
     #   fastapi
     #   pydantic
     #   pydantic-core
+    #   pydantic-extra-types
     #   rich-toolkit
     #   typer
     #   typing-inspection
 typing-inspection==0.4.2 \
     --hash=sha256:4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7 \
     --hash=sha256:ba561c48a67c5958007083d386c3295464928b01faa735ab8547c5692e87f464
-    # via pydantic
+    # via
+    #   pydantic
+    #   pydantic-settings
 tzdata==2025.2 \
     --hash=sha256:1a403fada01ff9221ca8044d701868fa132215d84beb92242d9acd2147f667a8 \
     --hash=sha256:b60a638fcc0daffadf82fe0f57e53d06bdec2f36c4df66280ae79bce6bd6f2b9

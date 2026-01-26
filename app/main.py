@@ -16,6 +16,11 @@ from pydantic import BaseModel
 from app.api.censys import HostFactory
 from app.api.feedly import BundleFactory
 from app.api.hunt_io import C2FeedFactory
+from app.api.palo_alto_cortex_xdr import (
+    AlertFactory,
+    GetAlertsResponse,
+    GetAlertsResponseItem,
+)
 from app.api.proofpoint_tap import CampaignDetailFactory, CampaignFactory
 from app.api.reversinglabs import (
     AnalysisResponseFactory,
@@ -258,3 +263,26 @@ async def censys_platform_global_asset_host(host_id: str):
         content=result.model_dump_json(),
         media_type="application/vnd.censys.api.v3.host.v1+json",
     )
+
+
+@app.post(
+    "/palo-alto-cortex-xdr/public_api/v1/alerts/get_alerts",
+    tags=["Palo Alto Cortex XDR"],
+)
+async def palo_alto_cortex_xdr_get_alerts(implant_id: str = Query("")):
+    """Palo Alto Cortex XDR Get Alerts Endpoint
+
+    Returns a sample response for Palo Alto Cortex XDR get alerts."""
+    prevented = AlertFactory.create(
+        action_pretty="Prevented (Blocked by XDR)",
+        actor_process_command_line=f"hello {implant_id}/agent.exe",
+    )
+    detected = AlertFactory.create(
+        action_pretty="Detected (Reported)",
+        actor_process_command_line=f"hello {implant_id}/agent.exe",
+    )
+    return GetAlertsResponse(
+        reply=GetAlertsResponseItem(
+            total_count=1, result_count=1, alerts=[prevented, detected]
+        )
+    ).model_dump()
