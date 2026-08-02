@@ -71,7 +71,7 @@ Assuming ofapi runs on `http://127.0.0.1:8000`:
 | `slack`                  | `SLACK_BASE_URL=http://127.0.0.1:8000/slack/api`                                                            |
 | `teams`                  | `TEAMS_AUTHORITY_BASE_URL=http://127.0.0.1:8000/microsoft-identity`<br>`TEAMS_GRAPH_BASE_URL=http://127.0.0.1:8000/microsoft-graph/v1.0` |
 | `email-google-workspace` | `GWS_GMAIL_BASE_URL=http://127.0.0.1:8000/gmail/v1` and `token_uri` set to `http://127.0.0.1:8000/google-oauth2/token` in the service account JSON |
-| `email-m365`             | see [Microsoft 365 needs HTTPS](#microsoft-365-needs-https)                                                 |
+| `email-m365`             | not usable yet, see [Microsoft 365](#microsoft-365)                                                         |
 | `ai-redteam`             | inject content `target_endpoint=http://127.0.0.1:8000/openai/v1`                                            |
 | `http-query`             | inject content `uri=http://127.0.0.1:8000/echo`                                                             |
 
@@ -93,24 +93,31 @@ Two details are easy to get wrong:
     injector's cursor pagination after a single page.
 *   `/echo` answers any method with a description of the request it received.
 
-### Microsoft 365 needs HTTPS
+### Microsoft 365
 
-MSAL refuses non-HTTPS authorities, so the `email-m365` injector needs ofapi behind TLS:
+The Graph endpoints are shared with the `teams` injector, so `sendMail` is served here
+too. The `email-m365` injector cannot reach them yet, for two reasons that both live in
+MSAL rather than in ofapi:
 
-```bash
-openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 825 \
-  -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost"
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8443 \
-  --ssl-keyfile key.pem --ssl-certfile cert.pem
-```
+*   MSAL refuses non-HTTPS authorities. Serving ofapi behind TLS solves this - generate a
+    certificate and trust it through `REQUESTS_CA_BUNDLE`:
+
+    ```bash
+    openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 825 \
+      -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost"
+    uv run uvicorn app.main:app --host 127.0.0.1 --port 8443 \
+      --ssl-keyfile key.pem --ssl-certfile cert.pem
+    ```
+
+*   MSAL then asks the *public* `login.microsoftonline.com` instance-discovery endpoint
+    whether the configured authority is a known cloud. No fake authority can satisfy that,
+    and the injector does not expose MSAL's `instance_discovery` switch, so the flow stops
+    before any request reaches ofapi.
+
+Once the injector allows instance discovery to be disabled, these settings are enough:
 
 ```bash
 M365_AUTHORITY_BASE_URL=https://127.0.0.1:8443/microsoft-identity
 M365_GRAPH_BASE_URL=https://127.0.0.1:8443/microsoft-graph/v1.0
-M365_INSTANCE_DISCOVERY=false
 REQUESTS_CA_BUNDLE=/path/to/cert.pem
 ```
-
-`M365_INSTANCE_DISCOVERY=false` is required: otherwise MSAL asks the *public*
-`login.microsoftonline.com` instance-discovery endpoint whether the authority is a known
-cloud, which no fake authority can satisfy.
