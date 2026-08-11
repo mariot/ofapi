@@ -11,6 +11,7 @@ This project is built with [FastAPI↗](https://fastapi.tiangolo.com/), a modern
 *   [Prerequisites](#prerequisites)
 *   [Installation](#installation)
 *   [API Usage](#api-usage)
+*   [OpenCTI connectors](#opencti-connectors)
 *   [OpenAEV injectors](#openaev-injectors)
 
 ## Prerequisites
@@ -53,6 +54,49 @@ Once the server is running, you can interact with the API using the automaticall
 *   **Swagger UI (Interactive Docs):** Navigate to [http://127.0.0.1:8000/docs↗](http://127.0.0.1:8000/docs) in your browser. This interface allows you to visualize and interact with the API's resources without having any of the implementation logic in place.
 
 *   **ReDoc (Alternative Docs):** Navigate to [http://127.0.0.1:8000/redoc↗](http://127.0.0.1:8000/redoc) for an alternative documentation view.
+
+## OpenCTI connectors
+
+Several [OpenCTI connectors↗](https://github.com/OpenCTI-Platform/connectors) push to, or
+enrich from, a third-party SaaS. Each one takes the vendor base URL from configuration, so
+pointing it at ofapi runs the whole connector lifecycle offline - typically alongside a
+real OpenCTI platform, which stays the only genuine component in the loop.
+
+Assuming ofapi runs on `http://127.0.0.1:8000`:
+
+| Connector                  | Environment variables                                            |
+|----------------------------|------------------------------------------------------------------|
+| `ismalicious`              | `ISMALICIOUS_API_URL=http://127.0.0.1:8000/ismalicious`          |
+| `splunk`                   | `SPLUNK_URL=http://127.0.0.1:8000/splunk`                        |
+| `splunk-soar-push`         | `SPLUNK_SOAR_URL=http://127.0.0.1:8000/splunk-soar`              |
+| `qradar`                   | `QRADAR_URL=http://127.0.0.1:8000/qradar`                        |
+| `harfanglab-intel`         | `HARFANGLAB_INTEL_URL=http://127.0.0.1:8000/harfanglab`          |
+| `sekoia-intel`             | `SEKOIA_INTEL_URL=http://127.0.0.1:8000/sekoia`                  |
+| `pan-cortex-xsoar-intel`   | `XSOAR_URL=http://127.0.0.1:8000/cortex-xsoar`                   |
+| `misp-intel`               | `MISP_URL=http://127.0.0.1:8000/misp`                            |
+| `webhook`                  | `WEBHOOK_URL=http://127.0.0.1:8000/echo`                         |
+
+### Stateful endpoints
+
+Stream connectors replay a create/update/delete lifecycle: they look an object up by an
+identifier they wrote earlier and only update or delete it when that lookup succeeds. A
+purely generated answer would silently skip those branches, so the vendors above keep
+their records in memory for the lifetime of the process - Splunk KV store documents,
+QRadar reference sets and entries, HarfangLab source lists and IOC rules, Sekoia
+indicators, Cortex XSOAR indicators, MISP events, and Splunk SOAR containers, artifacts
+and notes. Restarting ofapi resets them.
+
+Two details are easy to get wrong:
+
+*   `GET /qradar/api/reference_data_collections/sets` answers with a bare JSON **array**,
+    not an object, because that is what QRadar does and what the connector iterates over.
+*   `GET /misp/users/view/me` must return a complete `Role` object. PyMISP reads the
+    permission flags at connect time and disables features - or refuses to start - when
+    they are missing.
+*   The MISP endpoints answer at `/misp/...` **and** at the root, because PyMISP resolves
+    every path with `urljoin()` against the configured URL. A base URL carrying a path is
+    therefore discarded, and `MISP_URL=http://127.0.0.1:8000` reaches the same handlers.
+
 
 ## OpenAEV injectors
 
