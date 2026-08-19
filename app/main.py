@@ -15,6 +15,12 @@ from pydantic import BaseModel
 
 from app.api.censys import HostFactory
 from app.api.censys_search import CertificateHitFactory, HostHitFactory
+from app.api.crowdstrike import (
+    EntitiesAlertsResponse,
+    QueryAlertsResponse,
+    TokenResponseFactory as CrowdstrikeTokenResponseFactory,
+)
+from app.api.elastic import SearchResponse as ElasticSearchResponse
 from app.api.feedly import BundleFactory
 from app.api.google import GmailMessageFactory, GoogleTokenFactory
 from app.api.hunt_io import C2FeedFactory
@@ -23,18 +29,36 @@ from app.api.llm import (
     ChatCompletionFactory,
     completion_text,
 )
+from app.api.logrhythm import (
+    SearchResultResponse as LogRhythmSearchResultResponse,
+    SearchTaskResponseFactory as LogRhythmSearchTaskResponseFactory,
+)
 from app.api.microsoft import (
     ChatMessageFactory,
     TokenResponseFactory,
     fake_access_token,
     openid_configuration,
 )
+from app.api.netwitness import SdkQueryResponse as NetWitnessSdkQueryResponse
 from app.api.palo_alto_cortex_xdr import (
+    AlertEvent,
     AlertFactory,
+    Alerts,
+    FileArtifacts,
     GetAlertsResponse,
     GetAlertsResponseItem,
+    GetIncidentExtraDataResponse,
+    GetOriginalAlertsResponse,
+    Incident,
+    IncidentItem,
 )
+from app.api.palo_alto_cortex_xsoar import XSOARSearchIncidentsResponse
 from app.api.proofpoint_tap import CampaignDetailFactory, CampaignFactory
+from app.api.qradar import (
+    CreateSearchResponseFactory,
+    SearchResultsResponse,
+    SearchStatusResponse,
+)
 from app.api.reversinglabs import (
     AnalysisResponseFactory,
     DomainResponseFactory,
@@ -46,9 +70,20 @@ from app.api.reversinglabs import (
     UploadDetailFactory,
     UrlsResponseFactory,
 )
+from app.api.sentinelone import (
+    DVEventsResponse,
+    DVInitQueryData,
+    DVInitQueryResponse,
+    DVQueryStatusData,
+    DVQueryStatusResponse,
+    ThreatEventsResponse,
+    ThreatsResponse,
+)
 from app.api.shodan import ApiInfoFactory, MatchFactory
 from app.api.slack import PostedMessageFactory
+from app.api.splunk_es import SearchJobResponse
 from app.api.utils import remove_private_attributes
+from app.api.xtm_one import AgentsResponse, AuditLogsResponse
 
 app = FastAPI()
 
@@ -303,6 +338,71 @@ async def palo_alto_cortex_xdr_get_alerts(implant_id: str = Query("")):
     ).model_dump()
 
 
+@app.post("/crowdstrike/oauth2/token", tags=["CrowdStrike"], status_code=201)
+async def crowdstrike_oauth2_token(
+    client_id: Annotated[str, Form()] = "",
+    client_secret: Annotated[str, Form()] = "",
+):
+    """CrowdStrike OAuth2 Token Endpoint
+
+    Returns a fake bearer token for the CrowdStrike Falcon API (falconpy SDK)."""
+    return CrowdstrikeTokenResponseFactory().model_dump()
+
+
+@app.get(
+    "/crowdstrike/alerts/queries/alerts/v2",
+    tags=["CrowdStrike"],
+    response_model=QueryAlertsResponse,
+)
+async def crowdstrike_query_alerts_v2(filter: str = Query("")):  # noqa: A002
+    """CrowdStrike Query Alerts Endpoint
+
+    Returns an empty list of matching alert composite ids."""
+    return QueryAlertsResponse()
+
+
+@app.post(
+    "/crowdstrike/alerts/entities/alerts/v2",
+    tags=["CrowdStrike"],
+    response_model=EntitiesAlertsResponse,
+)
+async def crowdstrike_entities_alerts_v2():
+    """CrowdStrike Get Alert Entities Endpoint
+
+    Returns the details for the requested composite alert ids."""
+    return EntitiesAlertsResponse()
+
+
+@app.get("/tanium/plugin/products/threat-response/api/v1/alerts", tags=["Tanium"])
+async def tanium_threat_response_alerts():
+    """Tanium Threat Response Alerts Endpoint
+
+    Returns an empty list of alerts, matching the ``{"data": [...]}`` shape
+    the Tanium Threat Response API returns."""
+    return {"data": []}
+
+
+@app.get(
+    "/xtm-one/api/v1/agents", tags=["XTM One"], response_model=AgentsResponse
+)
+async def xtm_one_agents():
+    """XTM One Agents Catalog Endpoint
+
+    Returns the chat-capable agents catalog (empty by default)."""
+    return AgentsResponse()
+
+
+@app.get(
+    "/xtm-one/api/v1/audit-logs", tags=["XTM One"], response_model=AuditLogsResponse
+)
+async def xtm_one_audit_logs():
+    """XTM One Audit Logs Endpoint
+
+    Returns the security audit log used to validate prompt-injection detection
+    expectations (empty by default)."""
+    return AuditLogsResponse()
+
+
 @app.get("/censys/api/v2/hosts/search", tags=["Censys Search"])
 async def censys_search_hosts(
     q: str = Query(""),
@@ -520,6 +620,403 @@ async def anthropic_messages(
         content=[{"type": "text", "text": text}],
     )
     return asdict(message)
+
+
+# ---------------------------------------------------------------------------
+# ==== Elastic ====
+# Collector: collectors/elastic (raw `requests`, no official elasticsearch-py
+# client, so there is NO X-Elastic-Product header quirk to satisfy). Only one
+# endpoint is ever called: POST {base_url}/{alerts_index}/_search.
+# Auth: `Authorization: ApiKey <key>` OR HTTP Basic (username/password) -
+# both are accepted unconditionally here (fake server does not enforce auth).
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/elastic/{index}/_search",
+    tags=["Elastic"],
+    response_model=ElasticSearchResponse,
+)
+async def elastic_search(index: str, body: dict):  # noqa: ARG001
+    """Elastic Security Detection Alerts Search Endpoint
+
+    Fakes the Elasticsearch `_search` API used to query the detection alerts
+    index (default `.alerts-security.alerts-*`). Returns an empty `hits.hits`
+    list, which `ElasticResponse.from_raw_response` parses via defensive
+    `dict.get` lookups with no KeyError risk."""
+    return ElasticSearchResponse()
+
+
+# ---------------------------------------------------------------------------
+# ==== LogRhythm ====
+# Collector: collectors/logrhythm (raw `requests`, no vendor SDK). Two-step
+# Search API flow: create a search task, then poll for its result.
+# Auth: bearer token or HTTP Basic - accepted unconditionally here.
+# QUIRK: the search-result endpoint MUST return `TaskStatus: "Completed"` on
+# the very first poll, otherwise the collector busy-polls every
+# `poll_interval` until `search_timeout` (default 5 minutes) elapses before
+# raising LogRhythmTimeoutError.
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/logrhythm/lr-search-api/actions/search-task",
+    tags=["LogRhythm"],
+)
+async def logrhythm_search_task(body: dict):  # noqa: ARG001
+    """LogRhythm Search API - Create Search Task Endpoint
+
+    Returns a fake `TaskId`; the collector requires a truthy `TaskId` (or
+    `taskId`) or it raises `LogRhythmQueryError`."""
+    return LogRhythmSearchTaskResponseFactory().model_dump()
+
+
+@app.post(
+    "/logrhythm/lr-search-api/actions/search-result",
+    tags=["LogRhythm"],
+    response_model=LogRhythmSearchResultResponse,
+)
+async def logrhythm_search_result(body: dict):  # noqa: ARG001
+    """LogRhythm Search API - Poll Search Result Endpoint
+
+    Returns `TaskStatus: "Completed"` immediately with an empty `Items` list
+    so the collector's polling loop exits on the first call instead of
+    waiting out the full `search_timeout`."""
+    return LogRhythmSearchResultResponse()
+
+
+# ---------------------------------------------------------------------------
+# ==== NetWitness ====
+# Collector: collectors/netwitness (raw `requests`, no vendor SDK). Single
+# endpoint: GET {base_url}/sdk?msg=query&query=<NWQL>&
+# force-content-type=application/json&size=<max_results>.
+# Auth: bearer token or HTTP Basic - accepted unconditionally here. No
+# login/token endpoint exists on the real API.
+# ---------------------------------------------------------------------------
+
+
+@app.get(
+    "/netwitness/sdk",
+    tags=["NetWitness"],
+    response_model=NetWitnessSdkQueryResponse,
+)
+async def netwitness_sdk_query(
+    msg: str = Query(""),  # noqa: ARG001
+    query: str = Query(""),  # noqa: ARG001
+    size: int = Query(100),  # noqa: ARG001
+    force_content_type: str = Query("", alias="force-content-type"),  # noqa: ARG001
+):
+    """RSA NetWitness Core SDK Query Endpoint
+
+    Fakes the `msg=query` NWQL query interface. Returns an empty
+    `results.fields` list, which `NetWitnessResponse.from_raw_response`
+    parses via defensive `dict.get` lookups with no KeyError risk."""
+    return NetWitnessSdkQueryResponse()
+
+
+# ============================================================================
+# ==== Palo Alto Cortex XDR (collector) — additional endpoints ====
+# The existing `/palo-alto-cortex-xdr/public_api/v1/alerts/get_alerts` route
+# fakes the *injector's* endpoint. The palo-alto-cortex-xdr COLLECTOR instead
+# calls `get_alerts_multi_events`, `get_original_alerts`, and (unused today,
+# but present on the client for future use) `get_incident_extra_data`.
+# All three share the same header-based auth as the existing route: either
+# STANDARD (`x-xdr-auth-id` + `Authorization: <api_key>`) or ADVANCED
+# (adds `x-xdr-timestamp` + `x-xdr-nonce`, `Authorization` becomes an HMAC
+# sha256 of api_key+nonce+timestamp). Like the existing route and the
+# crowdstrike/oauth2 fake, signatures are NOT validated here — any headers
+# are accepted, which is sufficient for the collector's `raise_for_status()`
+# happy-path testing.
+# ============================================================================
+
+
+@app.post(
+    "/palo-alto-cortex-xdr/public_api/v1/alerts/get_alerts_multi_events",
+    tags=["Palo Alto Cortex XDR"],
+)
+async def palo_alto_cortex_xdr_get_alerts_multi_events(implant_id: str = Query("")):
+    """Palo Alto Cortex XDR Get Alerts (Multi Events) Endpoint
+
+    Fakes ``POST https://{fqdn}/public_api/v1/alerts/get_alerts_multi_events``,
+    called by ``PaloAltoCortexXDRClientAPI.get_alerts`` (src/services/client_api.py).
+    The real collector's ``AlertFetcher`` looks for an implant name directly in
+    ``alert.events[].actor_process_image_name`` (matching ``oaev-implant-...``);
+    when present it uses the alert immediately, otherwise it falls back to
+    ``get_original_alerts`` for enrichment. Returning the implant directly in
+    ``events`` here lets a fake collector run skip enrichment fully.
+    """
+    alert = AlertFactory.create(
+        events=[
+            AlertEvent(
+                actor_process_image_name=f"oaev-implant-{implant_id}-agent-1.exe"
+            )
+        ],
+    )
+    return GetAlertsResponse(
+        reply=GetAlertsResponseItem(total_count=1, result_count=1, alerts=[alert])
+    ).model_dump()
+
+
+@app.post(
+    "/palo-alto-cortex-xdr/public_api/v1/alerts/get_original_alerts",
+    tags=["Palo Alto Cortex XDR"],
+)
+async def palo_alto_cortex_xdr_get_original_alerts():
+    """Palo Alto Cortex XDR Get Original Alerts Endpoint
+
+    Fakes ``POST https://{fqdn}/public_api/v1/alerts/get_original_alerts``,
+    used by ``AlertFetcher._enrich_alerts`` to enrich alerts that had no
+    direct implant reference in their events. Since
+    ``get_alerts_multi_events`` above already embeds the implant directly,
+    this enrichment path is not exercised in the happy path; return an empty
+    list by default (matching ``{"reply": {"alerts": []}}``).
+    """
+    return GetOriginalAlertsResponse(reply={"alerts": []}).model_dump()
+
+
+@app.post(
+    "/palo-alto-cortex-xdr/public_api/v1/incidents/get_incident_extra_data",
+    tags=["Palo Alto Cortex XDR"],
+)
+async def palo_alto_cortex_xdr_get_incident_extra_data():
+    """Palo Alto Cortex XDR Get Incident Extra Data Endpoint
+
+    Fakes ``POST https://{fqdn}/public_api/v1/incidents/get_incident_extra_data``.
+    Defined on ``PaloAltoCortexXDRClientAPI.get_incident_extra_data`` but not
+    currently called anywhere in ``AlertFetcher``/``collector.py`` — added for
+    completeness/future use. Returns an empty incident shell.
+    """
+    return GetIncidentExtraDataResponse(
+        reply=Incident(
+            incident=IncidentItem(incident_id=1),
+            alerts=Alerts(),
+            file_artifacts=FileArtifacts(),
+        )
+    ).model_dump()
+
+
+# ============================================================================
+# ==== Palo Alto Cortex XSOAR (collector) ====
+# Only one endpoint is called by this collector. Auth uses the same
+# STANDARD/ADVANCED header scheme as XDR (`x-xdr-auth-id` always present;
+# ADVANCED adds `x-xdr-timestamp`/`x-xdr-nonce` and HMACs `Authorization`).
+# As with XDR/crowdstrike, no signature validation is performed here.
+# ============================================================================
+
+
+@app.post(
+    "/palo-alto-cortex-xsoar/xsoar/public/v1/incidents/search",
+    tags=["Palo Alto Cortex XSOAR"],
+)
+async def palo_alto_cortex_xsoar_search_incidents():
+    """Palo Alto Cortex XSOAR Search Incidents Endpoint
+
+    Fakes ``POST {api_url}/xsoar/public/v1/incidents/search``, called by
+    ``PaloAltoCortexXSOARClientAPI.search_incidents``
+    (src/services/client_api.py). The collector paginates via
+    ``filter.page``/``filter.size`` and reads ``CustomFields.xdralerts`` off
+    each incident. Returns zero incidents by default so ``AlertFetcher``
+    terminates pagination immediately.
+    """
+    return XSOARSearchIncidentsResponse(total=0, data=[]).model_dump()
+
+
+# ============================================================================
+# ==== SentinelOne (collector) ====
+# Auth is a simple static bearer-style header: `Authorization: ApiToken
+# {api_key}` set once on the requests.Session (see
+# SentinelOneClientAPI._create_session) — no HMAC/signature scheme at all,
+# so nothing to validate/skip here beyond accepting any Authorization value.
+# ============================================================================
+
+
+@app.get("/sentinelone/web/api/v2.1/threats", tags=["SentinelOne"])
+async def sentinelone_get_threats(
+    createdAt__gte: str = Query(""),  # noqa: N803
+    createdAt__lt: str = Query(""),  # noqa: N803
+    sortOrder: str = Query("desc"),  # noqa: N803
+    limit: int = Query(1000),
+):
+    """SentinelOne Get Threats Endpoint
+
+    Fakes ``GET {base_url}/web/api/v2.1/threats``, called by
+    ``FetcherThreat.fetch_threats_for_time_window``
+    (src/services/fetcher_threat.py). Returns an empty ``data`` list by
+    default; the response shape mirrors the raw vendor payload
+    (``threatInfo``/``agentRealtimeInfo``/``mitigationStatus``) consumed by
+    ``SentinelOneThreatsResponse.from_raw_response``.
+    """
+    return ThreatsResponse().model_dump()
+
+
+@app.get(
+    "/sentinelone/web/api/v2.1/threats/{threat_id}/explore/events",
+    tags=["SentinelOne"],
+)
+async def sentinelone_get_threat_events(threat_id: str, limit: int = Query(100)):
+    """SentinelOne Get Threat Events Endpoint
+
+    Fakes ``GET {base_url}/web/api/v2.1/threats/{threat_id}/explore/events``,
+    called by ``FetcherThreatEvents._fetch_all_events_for_threat``
+    (src/services/fetcher_threat_events.py). Returns an empty ``data`` list.
+    """
+    return ThreatEventsResponse().model_dump()
+
+
+@app.post("/sentinelone/web/api/v2.1/dv/init-query", tags=["SentinelOne"])
+async def sentinelone_dv_init_query():
+    """SentinelOne Deep Visibility Init Query Endpoint
+
+    Fakes ``POST {base_url}/web/api/v2.1/dv/init-query``, called by
+    ``FetcherDeepVisibility._init_dv_query``
+    (src/services/fetcher_deep_visibility.py). Returns a fixed ``queryId`` so
+    the collector can immediately proceed to poll query-status.
+    """
+    return DVInitQueryResponse(
+        data=DVInitQueryData(queryId="fake-query-id")
+    ).model_dump()
+
+
+@app.get("/sentinelone/web/api/v2.1/dv/query-status", tags=["SentinelOne"])
+async def sentinelone_dv_query_status(queryId: str = Query("")):  # noqa: N803
+    """SentinelOne Deep Visibility Query Status Endpoint
+
+    Fakes ``GET {base_url}/web/api/v2.1/dv/query-status``, polled by
+    ``FetcherDeepVisibility._wait_for_query_completion``. Always reports
+    ``responseState: "FINISHED"`` / ``progressStatus: 100`` immediately so the
+    collector's poll loop (up to 30 attempts) exits on the first call.
+    """
+    return DVQueryStatusResponse(data=DVQueryStatusData()).model_dump()
+
+
+@app.get("/sentinelone/web/api/v2.1/dv/events", tags=["SentinelOne"])
+async def sentinelone_dv_events(queryId: str = Query("")):  # noqa: N803
+    """SentinelOne Deep Visibility Events Endpoint
+
+    Fakes ``GET {base_url}/web/api/v2.1/dv/events``, called by
+    ``FetcherDeepVisibility._make_real_events_query``. Returns an empty
+    ``data`` list.
+    """
+    return DVEventsResponse().model_dump()
+
+
+# ============================================================================
+# ==== QRadar ====
+# ============================================================================
+#
+# Real collector flow (collectors/qradar/src/services/client_api.py):
+#   1. POST {base_url}/api/ariel/searches?query_expression=<AQL>
+#        -> creates an Ariel search, response must contain "search_id".
+#        Auth: "SEC" header (token) or HTTP Basic. "Version" header sent by
+#        client but not required to be validated by the fake.
+#   2. GET  {base_url}/api/ariel/searches/{search_id}
+#        -> polled until response["status"] == "COMPLETED" (raises on
+#        "ERROR"/"CANCELED"). Real IBM QRadar reports "WAIT"/"SORTING"/etc.
+#        while running; here we take the simpler approach and report
+#        "COMPLETED" on the very first poll. This is fine since we don't need
+#        to simulate realistic async delay for test purposes, and it avoids
+#        having to keep in-memory per-search poll-count state.
+#   3. GET  {base_url}/api/ariel/searches/{search_id}/results
+#        (with a "Range: items=0-N" header) -> response is a dict keyed by
+#        the Ariel *data source* name (default "events", can be "flows"),
+#        e.g. {"events": [...]}. The data source name is embedded in the AQL
+#        query text ("FROM <data_source> WHERE ..."), not sent as a separate
+#        parameter, so the fake below parses it back out of the AQL that was
+#        supplied at search-creation time (stored in an in-memory dict keyed
+#        by search_id) to always answer with the right key. Falls back to
+#        "events" if parsing fails.
+#
+# In-memory quirk: a small process-local dict (`_QRADAR_SEARCHES`) maps
+# search_id -> data_source, populated in the create-search handler and read
+# by the results handler. This is the only piece of state needed since the
+# job is always "instantly complete".
+
+_QRADAR_SEARCHES: dict[str, str] = {}
+
+
+def _qradar_parse_data_source(aql: str) -> str:
+    """Best-effort parse of the Ariel data source name out of an AQL string.
+
+    Looks for "FROM <data_source>" (case-insensitive); defaults to "events".
+    """
+    import re
+
+    match = re.search(r"\bFROM\s+(\w+)", aql or "", re.IGNORECASE)
+    return match.group(1) if match else "events"
+
+
+@app.post(
+    "/qradar/api/ariel/searches",
+    tags=["QRadar"],
+    status_code=201,
+)
+async def qradar_create_search(query_expression: str = Query("")):
+    """QRadar Ariel Create Search Endpoint
+
+    Fakes ``POST /api/ariel/searches``. Records the data source parsed from
+    the AQL so the results endpoint can answer with the matching key."""
+    search = CreateSearchResponseFactory()
+    _QRADAR_SEARCHES[search.search_id] = _qradar_parse_data_source(query_expression)
+    return search.model_dump()
+
+
+@app.get(
+    "/qradar/api/ariel/searches/{search_id}",
+    tags=["QRadar"],
+    response_model=SearchStatusResponse,
+)
+async def qradar_search_status(search_id: str):
+    """QRadar Ariel Search Status Endpoint
+
+    Fakes ``GET /api/ariel/searches/{search_id}``. Always reports the search
+    as already "COMPLETED" on the first poll (see module-level note above)."""
+    return SearchStatusResponse(search_id=search_id)
+
+
+@app.get(
+    "/qradar/api/ariel/searches/{search_id}/results",
+    tags=["QRadar"],
+)
+async def qradar_search_results(search_id: str):
+    """QRadar Ariel Search Results Endpoint
+
+    Fakes ``GET /api/ariel/searches/{search_id}/results``. Returns an empty
+    row list keyed by the data source recorded at search-creation time."""
+    data_source = _QRADAR_SEARCHES.get(search_id, "events")
+    return SearchResultsResponse.for_data_source(data_source)
+
+
+# ============================================================================
+# ==== Splunk ES ====
+# ============================================================================
+#
+# Real collector flow (collectors/splunk-es/src/services/client_api.py):
+#   POST {base_url}/services/search/jobs
+#     body (form-urlencoded): search=<SPL>, exec_mode=oneshot,
+#     output_mode=json, count=0
+#     Auth: HTTP Basic (username/password).
+#
+# Quirk: the collector always passes exec_mode=oneshot, which tells real
+# Splunk to run the search synchronously and return the final results in
+# this same HTTP response - there is NO separate job-id/status-polling/
+# results-fetch sequence for this collector (unlike a normal Splunk search
+# job, which would return a "sid" to poll via
+# /services/search/jobs/{sid} and /services/search/jobs/{sid}/results).
+# So a single stateless route fully satisfies this collector; no in-memory
+# job store is needed.
+
+
+@app.post(
+    "/splunk-es/services/search/jobs",
+    tags=["Splunk ES"],
+)
+async def splunk_es_search_jobs_oneshot():
+    """Splunk ES Oneshot Search Endpoint
+
+    Fakes ``POST /services/search/jobs`` with ``exec_mode=oneshot``. Returns
+    the final (empty) results directly, matching real Splunk's synchronous
+    oneshot behavior."""
+    return SearchJobResponse().model_dump()
 
 
 @app.api_route(
