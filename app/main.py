@@ -18,6 +18,8 @@ from app.api.censys_search import CertificateHitFactory, HostHitFactory
 from app.api.crowdstrike import (
     EntitiesAlertsResponse,
     QueryAlertsResponse,
+)
+from app.api.crowdstrike import (
     TokenResponseFactory as CrowdstrikeTokenResponseFactory,
 )
 from app.api.elastic import SearchResponse as ElasticSearchResponse
@@ -31,11 +33,14 @@ from app.api.llm import (
 )
 from app.api.logrhythm import (
     SearchResultResponse as LogRhythmSearchResultResponse,
+)
+from app.api.logrhythm import (
     SearchTaskResponseFactory as LogRhythmSearchTaskResponseFactory,
 )
 from app.api.microsoft import (
     ChatMessageFactory,
     TokenResponseFactory,
+    defender_o365_alert,
     fake_access_token,
     openid_configuration,
 )
@@ -382,9 +387,7 @@ async def tanium_threat_response_alerts():
     return {"data": []}
 
 
-@app.get(
-    "/xtm-one/api/v1/agents", tags=["XTM One"], response_model=AgentsResponse
-)
+@app.get("/xtm-one/api/v1/agents", tags=["XTM One"], response_model=AgentsResponse)
 async def xtm_one_agents():
     """XTM One Agents Catalog Endpoint
 
@@ -560,6 +563,35 @@ async def microsoft_graph_chat_message(chat_id: str, payload: dict):
     result = message.to_dict()
     result["webUrl"] = f"https://teams.microsoft.com/l/message/{chat_id}/{message.id}"
     return result
+
+
+@app.get(
+    "/microsoft-graph/v1.0/security/alerts_v2",
+    tags=["Microsoft Graph"],
+)
+async def microsoft_graph_security_alerts_v2(
+    request: fastapi.Request,
+    filter: Annotated[str | None, Query(alias="$filter")] = None,
+):
+    """Microsoft Graph Security Alerts v2 Endpoint
+
+    Added while exercising OpenAEV-Platform/collectors#569 (microsoft-defender-o365)
+    end to end against ofapi. Rejects requests missing a well-formed bearer
+    token, unlike the other fakes here, since the collector under test is
+    expected to send one on every request.
+    """
+    authorization = request.headers.get("authorization", "")
+    if not authorization.startswith("Bearer ") or len(authorization) <= len("Bearer "):
+        return fastapi.responses.JSONResponse(
+            status_code=401,
+            content={"error": {"code": "InvalidAuthenticationToken"}},
+        )
+
+    service_source = "microsoftDefenderForOffice365"
+    if filter and "serviceSource eq" in filter:
+        service_source = filter.split("'")[1]
+
+    return {"value": [defender_o365_alert("ofapi-alert-1", service_source)]}
 
 
 @app.post("/google-oauth2/token", tags=["Google"])

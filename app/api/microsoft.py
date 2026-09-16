@@ -155,3 +155,51 @@ def openid_configuration(base_url: str, tenant_id: str) -> dict:
         "cloud_graph_host_name": "graph.windows.net",
         "msgraph_host": "graph.microsoft.com",
     }
+
+
+def defender_o365_alert(alert_id: str, service_source: str) -> dict:
+    """A single Graph Security API v2 alert, shaped for microsoft-defender-o365.
+
+    Fixture added while exercising OpenAEV-Platform/collectors#569 end to end.
+    Not backed by a factory since only one, deliberately deterministic alert
+    is needed to drive the collector's matching engine.
+    """
+    return {
+        "id": alert_id,
+        "providerAlertId": alert_id,
+        "incidentId": "1",
+        "title": "Malicious URL detected in email",
+        "description": "ofapi fixture alert for collector testing",
+        "status": "resolved",
+        "severity": "high",
+        "classification": "truePositive",
+        "determination": "phishing",
+        "serviceSource": service_source,
+        "detectionSource": "office365",
+        "categories": ["InitialAccess"],
+        "mitreTechniques": ["T1566.002"],
+        "createdDateTime": "2026-09-16T10:00:00Z",
+        "lastUpdateDateTime": "2026-09-16T10:00:00Z",
+        "evidence": [
+            {
+                "@odata.type": "#microsoft.graph.security.analyzedMessageEvidence",
+                "networkMessageId": "ofapi-network-message-id",
+                "internetMessageId": "<ofapi@example.com>",
+                "subject": "Invoice attached",
+                "receivedDateTime": "2026-09-16T09:59:00Z",
+                "recipientEmailAddress": "victim@example.com",
+                "senderIp": "203.0.113.10",
+                "p1Sender": {
+                    "emailAddress": "attacker@example.com",
+                    "displayName": "Attacker",
+                    "domainName": "example.com",
+                },
+                "p2Sender": {
+                    "emailAddress": "attacker@example.com",
+                    "displayName": "Attacker",
+                    "domainName": "example.com",
+                },
+                "urls": ["https://malicious.example.com/invoice.html"],
+            }
+        ],
+    }
