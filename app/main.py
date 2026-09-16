@@ -13,6 +13,7 @@ from fastapi import FastAPI, File, Form, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.api.aws_roles_anywhere import build_create_session_response
 from app.api.censys import HostFactory
 from app.api.censys_search import CertificateHitFactory, HostHitFactory
 from app.api.crowdstrike import (
@@ -1049,6 +1050,26 @@ async def splunk_es_search_jobs_oneshot():
     the final (empty) results directly, matching real Splunk's synchronous
     oneshot behavior."""
     return SearchJobResponse().model_dump()
+
+
+@app.post(
+    "/rolesanywhere/sessions",
+    tags=["AWS IAM Roles Anywhere"],
+)
+async def rolesanywhere_create_session(request: fastapi.Request):
+    """IAM Roles Anywhere ``CreateSession`` Endpoint
+
+    Fakes the ``POST /sessions`` call made by ``aws-resources``' SigV4 X.509
+    signer. Doesn't verify the ``Authorization``/``X-Amz-X509`` signature (no
+    real trust anchor exists in this fake environment); it only mints
+    short-lived fake credentials for whatever ``roleArn``/``profileArn`` was
+    requested, so collectors can exercise the full certificate-to-credentials
+    exchange end-to-end."""
+    payload = await request.json()
+    return build_create_session_response(
+        role_arn=payload.get("roleArn", ""),
+        profile_arn=payload.get("profileArn", ""),
+    )
 
 
 @app.api_route(

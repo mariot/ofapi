@@ -124,6 +124,31 @@ def test_microsoft_graph_chat_message():
     assert "chat-1" in response.json()["webUrl"]
 
 
+def test_rolesanywhere_create_session():
+    response = client.post(
+        "/rolesanywhere/sessions",
+        json={
+            "roleArn": "arn:aws:iam::123456789012:role/test",
+            "profileArn": (
+                "arn:aws:rolesanywhere:eu-west-1:123456789012:profile/test"
+            ),
+            "trustAnchorArn": (
+                "arn:aws:rolesanywhere:eu-west-1:123456789012:trust-anchor/test"
+            ),
+            "durationSeconds": 3600,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    credentials = body["credentialSet"][0]
+    assert credentials["roleArn"] == "arn:aws:iam::123456789012:role/test"
+    fake_creds = credentials["credentials"]
+    assert fake_creds["accessKeyId"]
+    assert fake_creds["secretAccessKey"]
+    assert fake_creds["sessionToken"]
+    assert fake_creds["expiration"]
+
+
 def test_google_oauth2_token():
     response = client.post("/google-oauth2/token")
     assert response.status_code == 200
