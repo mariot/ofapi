@@ -89,7 +89,7 @@ from app.api.sentinelone import (
 )
 from app.api.shodan import ApiInfoFactory, MatchFactory
 from app.api.slack import PostedMessageFactory
-from app.api.splunk_es import SearchJobResponse
+from app.api.splunk_es import build_search_job_response
 from app.api.utils import remove_private_attributes
 from app.api.xtm_one import AgentsResponse, AuditLogsResponse
 from app.control import ControlMiddleware
@@ -1054,13 +1054,18 @@ async def qradar_search_results(search_id: str):
     "/splunk-es/services/search/jobs",
     tags=["Splunk ES"],
 )
-async def splunk_es_search_jobs_oneshot():
+async def splunk_es_search_jobs_oneshot(request: fastapi.Request):
     """Splunk ES Oneshot Search Endpoint
 
     Fakes ``POST /services/search/jobs`` with ``exec_mode=oneshot``. Returns
-    the final (empty) results directly, matching real Splunk's synchronous
-    oneshot behavior."""
-    return SearchJobResponse().model_dump()
+    one matching notable when the SPL's ``earliest``/``latest`` bounds are in
+    a format real Splunk parses (epoch, relative, or %m/%d/%Y:%H:%M:%S), or
+    empty results otherwise - reproducing a real Splunk search FATAL on an
+    unparseable ISO-8601 time bound (still HTTP 200, zero results), so a
+    collector-side time-format bug is actually observable end to end."""
+    form = await request.form()
+    search = str(form.get("search", ""))
+    return build_search_job_response(search).model_dump()
 
 
 @app.post(
