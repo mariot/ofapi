@@ -2,6 +2,7 @@ import gzip
 import io
 import json
 from dataclasses import asdict
+from datetime import UTC, datetime
 from typing import Annotated
 
 import fastapi
@@ -41,6 +42,7 @@ from app.api.logrhythm import (
 from app.api.microsoft import (
     ChatMessageFactory,
     TokenResponseFactory,
+    defender_endpoint_alert,
     defender_o365_alert,
     fake_access_token,
     openid_configuration,
@@ -90,8 +92,12 @@ from app.api.slack import PostedMessageFactory
 from app.api.splunk_es import SearchJobResponse
 from app.api.utils import remove_private_attributes
 from app.api.xtm_one import AgentsResponse, AuditLogsResponse
+from app.control import ControlMiddleware
+from app.control import router as control_router
 
 app = FastAPI()
+app.add_middleware(ControlMiddleware)
+app.include_router(control_router)
 
 
 @app.get("/hunt-io/feeds/c2", tags=["Hunt-IO"], response_class=StreamingResponse)
@@ -591,6 +597,11 @@ async def microsoft_graph_security_alerts_v2(
     service_source = "microsoftDefenderForOffice365"
     if filter and "serviceSource eq" in filter:
         service_source = filter.split("'")[1]
+
+    if service_source == "microsoftDefenderForEndpoint":
+        # Created "now" so it survives the collector's ``createdDateTime ge`` filter.
+        alert = defender_endpoint_alert("ofapi-alert-2", datetime.now(UTC))
+        return {"value": [alert]}
 
     return {"value": [defender_o365_alert("ofapi-alert-1", service_source)]}
 

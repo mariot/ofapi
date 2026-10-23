@@ -55,6 +55,46 @@ Once the server is running, you can interact with the API using the automaticall
 
 *   **ReDoc (Alternative Docs):** Navigate to [http://127.0.0.1:8000/redoc↗](http://127.0.0.1:8000/redoc) for an alternative documentation view.
 
+## Scenario control API
+
+Every fake goes through a small control layer, driven from `/_control/*` by whoever runs
+the test (never by the collector or injector under test).
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /_control/rules` | Script what matching requests answer, call after call |
+| `GET /_control/rules` | Current rules, with how many calls each one served |
+| `DELETE /_control/rules/{id}` / `DELETE /_control/rules` | Drop one rule / all rules |
+| `GET /_control/journal?method=&path=` | Every request the fakes received: method, path, query, headers (secrets redacted), body, status, matching rule and whether the rule or the real fake answered (`served_by`); `path` is a prefix |
+| `DELETE /_control/journal` | Clear the journal |
+| `POST /_control/reset` | Forget every rule and the journal |
+
+A rule matches on `path` (a prefix, or a regex when it starts with `^`) and an optional
+`method`. Call *n* gets `responses[n]`; each step sets `status` (default 200), a JSON
+`body` or a raw `text` with `content_type`, extra `headers` and `delay_ms`, or
+`"passthrough": true` to let the real fake answer. Once the steps run out, the rule hands
+over to the real fake (`"then": "passthrough"`, the default) or keeps repeating the last
+step (`"then": "last"`).
+
+```bash
+# Defender alert latency: nothing on the first two polls, the real fixture from the third on
+curl -X POST http://127.0.0.1:8000/_control/rules -H 'Content-Type: application/json' -d '{
+  "path": "/microsoft-graph/v1.0/security/alerts_v2",
+  "responses": [{"body": {"value": []}}, {"body": {"value": []}}]
+}'
+
+# rate limiting: answer 429 once, then behave normally
+curl -X POST http://127.0.0.1:8000/_control/rules -H 'Content-Type: application/json' -d '{
+  "path": "/crowdstrike/alerts", "responses": [{"status": 429, "headers": {"Retry-After": "1"}}]
+}'
+
+# what did the collector actually send?
+curl 'http://127.0.0.1:8000/_control/journal?path=/microsoft-graph'
+```
+
+The journal keeps the last 5000 requests in memory. Header values whose name contains
+`authorization`, `cookie`, `token`, `key` or `secret` are stored as `<redacted>`.
+
 ## OpenAEV injectors
 
 Several [OpenAEV injectors↗](https://github.com/OpenAEV-Platform/injectors) talk to a
@@ -108,7 +148,8 @@ Assuming ofapi runs on `http://127.0.0.1:8000`:
 | `palo-alto-cortex-xsoar`    | `PALO_ALTO_CORTEX_XSOAR_API_URL=http://127.0.0.1:8000/palo-alto-cortex-xsoar`                                   |
 | `sentinelone`               | `SENTINELONE_BASE_URL=http://127.0.0.1:8000/sentinelone`                                                        |
 | `hiddenlayer`/`lakera-guard`/`prisma-airs`/`prompt-security` | run cleanly against Mimikyu's AI expectations endpoint alone; no vendor fake required for a clean startup |
-| `microsoft-azure`/`microsoft-defender`/`microsoft-defender-o365`/`microsoft-entra`/`microsoft-intune` | not usable, see [Known limitations](#known-limitations)                          |
+| `microsoft-defender`        | `SOURCE_BASE_URL=http://127.0.0.1:8000/microsoft-graph/v1.0` for alerts; authentication still needs a collector change, see [Known limitations](#known-limitations) |
+| `microsoft-azure`/`microsoft-defender-o365`/`microsoft-entra`/`microsoft-intune` | not usable, see [Known limitations](#known-limitations)                          |
 | `google-workspace`          | not usable, see [Known limitations](#known-limitations)                                                         |
 | `aws-resources`             | starts and registers cleanly, but talks to real AWS (see [Known limitations](#known-limitations))               |
 
@@ -133,7 +174,11 @@ itself, which is out of scope for this project:
     which posts directly to the *public* `https://login.microsoftonline.com/{tenant_id}`
     endpoint with no base-URL override exposed by the collector. Even a valid-looking fake
     tenant is rejected by the real Microsoft endpoint (`AADSTS900023`) before any request
-    could reach ofapi.
+    could reach ofapi. For `microsoft-defender`, the Graph side is ready: point
+    `SOURCE_BASE_URL` at `/microsoft-graph/v1.0` and `security/alerts_v2` answers a
+    Defender for Endpoint alert (device and process evidence) when the collector filters on
+    `serviceSource eq 'microsoftDefenderForEndpoint'`. Only the MSAL token request still
+    has to be stubbed until the collector exposes its authority host.
 *   `google-workspace` builds its Admin SDK client with `googleapiclient.discovery.build()`,
     whose bundled discovery document always targets `https://www.googleapis.com`, with no
     `discoveryServiceUrl` override passed by the collector.

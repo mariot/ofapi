@@ -17,6 +17,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 
 import factory
 
@@ -201,5 +202,49 @@ def defender_o365_alert(alert_id: str, service_source: str) -> dict:
                 },
                 "urls": ["https://malicious.example.com/invoice.html"],
             }
+        ],
+    }
+
+
+def defender_endpoint_alert(alert_id: str, created: datetime) -> dict:
+    """A single Graph Security API v2 alert, shaped for microsoft-defender (Endpoint).
+
+    Carries the device and process evidence the collector extracts signatures from
+    (hostname, IPs, process/parent process names, command line). The process names
+    are fixed, so matching a specific OpenAEV expectation means scripting the
+    response through the ``/_control/rules`` API.
+    """
+    return {
+        "id": alert_id,
+        "providerAlertId": alert_id,
+        "incidentId": "2",
+        "title": "Suspicious process execution",
+        "description": "ofapi fixture alert for collector testing",
+        "status": "resolved",
+        "severity": "medium",
+        "classification": "truePositive",
+        "determination": "malware",
+        "serviceSource": "microsoftDefenderForEndpoint",
+        "detectionSource": "microsoftDefenderForEndpoint",
+        "categories": ["Execution"],
+        "mitreTechniques": ["T1059.001"],
+        "alertWebUrl": f"https://security.microsoft.com/alerts/{alert_id}",
+        "createdDateTime": created.isoformat().replace("+00:00", "Z"),
+        "lastUpdateDateTime": created.isoformat().replace("+00:00", "Z"),
+        "evidence": [
+            {
+                "@odata.type": "#microsoft.graph.security.deviceEvidence",
+                "deviceDnsName": "ofapi-workstation.example.local",
+                "hostName": "ofapi-workstation",
+                "lastIpAddress": "192.0.2.10",
+                "lastExternalIpAddress": "203.0.113.20",
+                "ipInterfaces": ["192.0.2.10"],
+            },
+            {
+                "@odata.type": "#microsoft.graph.security.processEvidence",
+                "processCommandLine": "powershell.exe -enc ZQBjAGgAbwAgAG8AZgA=",
+                "imageFile": {"fileName": "powershell.exe"},
+                "parentProcessImageFile": {"fileName": "cmd.exe"},
+            },
         ],
     }
