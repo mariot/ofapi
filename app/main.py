@@ -18,6 +18,10 @@ from app.api.aws_roles_anywhere import build_create_session_response
 from app.api.censys import HostFactory
 from app.api.censys_search import CertificateHitFactory, HostHitFactory
 from app.api.crowdstrike import (
+    AlertFactory as CrowdstrikeAlertFactory,
+)
+from app.api.crowdstrike import (
+    EntitiesAlertsRequest,
     EntitiesAlertsResponse,
     QueryAlertsResponse,
 )
@@ -378,11 +382,17 @@ async def crowdstrike_query_alerts_v2(filter: str = Query("")):  # noqa: A002
     tags=["CrowdStrike"],
     response_model=EntitiesAlertsResponse,
 )
-async def crowdstrike_entities_alerts_v2():
+async def crowdstrike_entities_alerts_v2(request: EntitiesAlertsRequest):
     """CrowdStrike Get Alert Entities Endpoint
 
-    Returns the details for the requested composite alert ids."""
-    return EntitiesAlertsResponse()
+    Returns one detection-only alert per requested composite id. Script the alert content
+    (process names, ``pattern_disposition``...) through ``/_control/rules``."""
+    return EntitiesAlertsResponse(
+        resources=[
+            CrowdstrikeAlertFactory(composite_id=composite_id)
+            for composite_id in request.composite_ids
+        ]
+    )
 
 
 @app.get("/tanium/plugin/products/threat-response/api/v1/alerts", tags=["Tanium"])
