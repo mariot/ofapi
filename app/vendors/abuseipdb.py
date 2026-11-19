@@ -1,4 +1,5 @@
-"""AbuseIPDB: the IP check, read by the OpenCTI abuseipdb enrichment connector."""
+"""AbuseIPDB: the IP check (abuseipdb enrichment connector) and the blacklist
+(abuseipdb-ipblacklist import connector)."""
 
 from fastapi import APIRouter, Query
 
@@ -45,4 +46,27 @@ async def check(ip_address: str = Query(alias="ipAddress"), verbose: str = "") -
             "lastReportedAt": reports[0]["reportedAt"],
             "reports": reports if verbose else [],
         }
+    }
+
+
+@router.get("/api/v2/blacklist")
+async def blacklist(
+    confidence_minimum: int = Query(100, alias="confidenceMinimum"),
+    limit: int = 10000,
+    ip_version: int | None = Query(None, alias="ipVersion"),
+) -> dict:
+    """The most reported addresses (IPv4 and IPv6) above the confidence score asked."""
+    versions = [ip_version] if ip_version else [4, 4, 4, 4, 4, 6, 6]
+    data = [
+        {
+            "ipAddress": fake.ipv4_public() if version == 4 else fake.ipv6(),
+            "countryCode": fake.random_element(["FR", "US", "DE", "CN", "BR", "NL"]),
+            "abuseConfidenceScore": fake.random_int(confidence_minimum, 100),
+            "lastReportedAt": fake.date_time_this_month().isoformat() + "+00:00",
+        }
+        for version in versions[:limit]
+    ]
+    return {
+        "meta": {"generatedAt": fake.date_time_this_month().isoformat() + "+00:00"},
+        "data": data,
     }
