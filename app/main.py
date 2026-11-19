@@ -106,10 +106,13 @@ from app.api.utils import remove_private_attributes
 from app.api.xtm_one import AgentsResponse, AuditLogsResponse
 from app.control import ControlMiddleware
 from app.control import router as control_router
+from app.vendors import routers as vendor_routers
 
 app = FastAPI()
 app.add_middleware(ControlMiddleware)
 app.include_router(control_router)
+for vendor_router in vendor_routers():
+    app.include_router(vendor_router)
 
 
 @app.get("/hunt-io/feeds/c2", tags=["Hunt-IO"], response_class=StreamingResponse)

@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 
 [[package]]
@@ -139,6 +139,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c9/4b/ca43f6bbcef63deb8ac01201af306388670a172587169aab3b192f7490f0/faker-37.11.0.tar.gz", hash = "sha256:22969803849ba0618be8eee2dd01d0d9e2cd3b75e6ff1a291fa9abcdb34da5e6", size = 1935301, upload-time = "2025-10-07T14:49:01.481Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a3/46/8f4097b55e43af39e8e71e1f7aec59ff7398bca54d975c30889bc844719d/faker-37.11.0-py3-none-any.whl", hash = "sha256:1508d2da94dfd1e0087b36f386126d84f8583b3de19ac18e392a2831a6676c57", size = 1975525, upload-time = "2025-10-07T14:48:58.29Z" },
+]
+
+[[package]]
+name = "faker-cti"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "faker" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/60/fa/8ec6e43053765694f3b47c48f3490053cf4dbd6875ff00cb51094d231bc2/faker_cti-0.1.0.tar.gz", hash = "sha256:fabc2e4f7d1297a478115d9ffcb0b5ab7e67919ef0de9d32461c2ea692508486", size = 41349, upload-time = "2026-10-13T19:17:17.496Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/96/5f/fcf0135f5bc49c34b60308743bd2eedc457452d9b8f7f8a27f245f34ae8b/faker_cti-0.1.0-py3-none-any.whl", hash = "sha256:2e8cbb2a79595ea7b41ef2f721c83a82c9bd8aad15d9fd3a8073c4e88aae0982", size = 33246, upload-time = "2026-10-13T19:17:16.495Z" },
 ]
 
 [[package]]
@@ -354,6 +366,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "censys-platform" },
     { name = "factory-boy" },
+    { name = "faker-cti" },
     { name = "fastapi", extra = ["standard-no-fastapi-cloud-cli"] },
     { name = "httpx" },
     { name = "pydantic" },
@@ -371,6 +384,7 @@ dev = [
 requires-dist = [
     { name = "censys-platform", specifier = ">=0.12.1" },
     { name = "factory-boy", specifier = "==3.3.3" },
+    { name = "faker-cti", specifier = ">=0.1.0" },
     { name = "fastapi", extras = ["standard-no-fastapi-cloud-cli"], specifier = "==0.128.0" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "pydantic", specifier = ">=2.12.5" },
