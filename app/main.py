@@ -113,7 +113,11 @@ vendors.include_all(app)
 @app.post("/_control/reload", tags=["Control"])
 async def reload_vendors() -> dict:
     """Load vendor modules added or changed since start, keeping rules and journal."""
-    return {"reloaded": vendors.reload_into(app), "broken": vendors.broken}
+    return {
+        "reloaded": vendors.reload_into(app),
+        "broken": vendors.broken,
+        "host_conflicts": vendors.host_conflicts(),
+    }
 
 
 @app.get("/_control/hosts", tags=["Control"])

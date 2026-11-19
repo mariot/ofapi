@@ -95,11 +95,24 @@ def reload_into(app: FastAPI) -> list[str]:
 
 def hosts() -> dict[str, str]:
     """Real vendor host pattern -> path prefix of its fake."""
-    mapping = {}
+    return {pattern: owners[-1][1] for pattern, owners in _host_owners().items()}
+
+
+def host_conflicts() -> dict[str, list[str]]:
+    """Hosts declared by several modules (the last one in name order answers)."""
+    return {
+        pattern: [module for module, _ in owners]
+        for pattern, owners in _host_owners().items()
+        if len(owners) > 1
+    }
+
+
+def _host_owners() -> dict[str, list[tuple[str, str]]]:
+    owners: dict[str, list[tuple[str, str]]] = {}
     for name in _modules():
         module = sys.modules.get(f"{__name__}.{name}")
         router = getattr(module, "router", None)
         for pattern in getattr(module, "HOSTS", []):
             prefix = router.prefix if isinstance(router, APIRouter) else f"/{name}"
-            mapping[pattern] = prefix
-    return mapping
+            owners.setdefault(pattern, []).append((name, prefix))
+    return owners
