@@ -44,9 +44,24 @@ def routers() -> list[APIRouter]:
     return found
 
 
+# module name -> why it could not be loaded (it is skipped, the others keep working)
+broken: dict[str, str] = {}
+
+
 def include_all(app: FastAPI) -> None:
     for name in _modules():
+        _try_include(app, name)
+
+
+def _try_include(app: FastAPI, name: str) -> bool:
+    try:
         _include(app, name)
+    except Exception as err:  # one broken fake must not take the others down
+        broken[name] = f"{type(err).__name__}: {err}"
+        _loaded[name] = (_mtime(name), [])
+        return False
+    broken.pop(name, None)
+    return True
 
 
 def _include(app: FastAPI, name: str) -> None:
@@ -72,8 +87,8 @@ def reload_into(app: FastAPI) -> list[str]:
             continue
         for route in _loaded.get(name, (0, []))[1]:
             app.router.routes.remove(route)
-        _include(app, name)
-        changed.append(name)
+        if _try_include(app, name):
+            changed.append(name)
     app.openapi_schema = None
     return changed
 

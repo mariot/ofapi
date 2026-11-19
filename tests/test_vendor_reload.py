@@ -58,3 +58,12 @@ def test_reset_can_keep_other_vendors():
     client.post("/_control/reset", params={"prefix": "/a"})
     assert [r["path"] for r in client.get("/_control/rules").json()] == ["/b/x"]
     assert {e["path"] for e in client.get("/_control/journal").json()} == {"/b/x"}
+
+
+@pytest.mark.usefixtures("probe")
+def test_a_broken_module_is_reported_and_skipped():
+    client = TestClient(app)
+    MODULE.write_text("raise RuntimeError('half written')\n")
+    answer = client.post("/_control/reload").json()
+    assert "half written" in answer["broken"]["zz_reload_probe"]
+    assert client.get("/_control/rules").status_code == 200
