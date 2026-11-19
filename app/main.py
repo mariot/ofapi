@@ -11,10 +11,18 @@ from censys_platform import (
     ResponseEnvelopeHostAsset,
 )
 from fastapi import FastAPI, File, Form, Query, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
+from app.api.aws_ec2 import describe_instances_xml
+from app.api.aws_ec2 import error_xml as ec2_error_xml
 from app.api.aws_roles_anywhere import build_create_session_response
+from app.api.catalogs import (
+    atlas_bundle,
+    nvd_cves,
+    nvd_source,
+    openaev_payloads_manifest,
+)
 from app.api.censys import HostFactory
 from app.api.censys_search import CertificateHitFactory, HostHitFactory
 from app.api.crowdstrike import (
@@ -1117,3 +1125,63 @@ async def echo(request: fastapi.Request):
         "headers": dict(request.headers),
         "body": body,
     }
+
+
+# ============================================================================
+# ==== Catalog sources (OpenAEV catalog collectors) ====
+# Tiny datasets for collectors whose source URL is configurable: mitre-atlas
+# (COLLECTOR_STIX_URL), nvd-nist-cve (NVDNISTCVE_API_BASE_URL) and openaev
+# (OPENAEV_URL_PREFIX). See app/api/catalogs.py.
+# ============================================================================
+
+
+@app.get("/mitre-atlas/stix-atlas.json", tags=["MITRE ATLAS"])
+async def mitre_atlas_stix():
+    """MITRE ATLAS STIX bundle (ATT&CK-compatible): 2 tactics, 3 techniques
+    (one sub-technique) and 1 revoked technique the collector must skip."""
+    return atlas_bundle()
+
+
+@app.get("/nvd/rest/json/cves/2.0", tags=["NVD"])
+async def nvd_cves_page(
+    startIndex: int = Query(0),  # noqa: N803
+    resultsPerPage: int = Query(2000),  # noqa: N803
+):
+    """NVD CVE API 2.0: 3 CVEs, one without CVSS v3.1 (not sent on by the collector)."""
+    return nvd_cves(startIndex, resultsPerPage)
+
+
+@app.get("/nvd/rest/json/source/2.0", tags=["NVD"])
+async def nvd_source_lookup(sourceIdentifier: str = Query("")):  # noqa: N803
+    """NVD Source API 2.0: resolves a CWE source identifier to a name."""
+    return nvd_source(sourceIdentifier)
+
+
+@app.get("/openaev-payloads/manifest.json", tags=["OpenAEV payloads"])
+async def openaev_payloads():
+    """OpenAEV payload repository manifest: one native and one community payload."""
+    return openaev_payloads_manifest()
+
+
+# ============================================================================
+# ==== AWS EC2 (aws-resources collector) ====
+# boto3 honours AWS_ENDPOINT_URL_EC2: point it at http://127.0.0.1:8000/aws-ec2.
+# The Query protocol posts an Action form field and expects XML back.
+# ============================================================================
+
+
+@app.post("/aws-ec2", tags=["AWS EC2"])
+@app.post("/aws-ec2/", tags=["AWS EC2"])
+async def aws_ec2(request: fastapi.Request):
+    """AWS EC2 Query API: DescribeInstances answers 3 instances (running,
+    terminated, stopped without any address); other actions are refused."""
+    form = await request.form()
+    action = form.get("Action")
+    if action == "DescribeInstances":
+        return Response(describe_instances_xml(), media_type="text/xml")
+    return Response(
+        ec2_error_xml("InvalidAction", f"ofapi does not fake {action}"),
+        status_code=400,
+        media_type="text/xml",
+    )
+
