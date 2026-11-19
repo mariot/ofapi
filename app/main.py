@@ -687,8 +687,9 @@ async def anthropic_messages(
 # ---------------------------------------------------------------------------
 # ==== Elastic ====
 # Collector: collectors/elastic (raw `requests`, no official elasticsearch-py
-# client, so there is NO X-Elastic-Product header quirk to satisfy). Only one
-# endpoint is ever called: POST {base_url}/{alerts_index}/_search.
+# client, so there is NO X-Elastic-Product header quirk to satisfy). Searches go
+# to POST {base_url}/{alerts_index}/_search; at startup the collector checks
+# both indices with {index}/_count (GET for alerts, POST for events).
 # Auth: `Authorization: ApiKey <key>` OR HTTP Basic (username/password) -
 # both are accepted unconditionally here (fake server does not enforce auth).
 # ---------------------------------------------------------------------------
@@ -707,6 +708,15 @@ async def elastic_search(index: str, body: dict):  # noqa: ARG001
     list, which `ElasticResponse.from_raw_response` parses via defensive
     `dict.get` lookups with no KeyError risk."""
     return ElasticSearchResponse()
+
+
+@app.api_route("/elastic/{index}/_count", methods=["GET", "POST"], tags=["Elastic"])
+async def elastic_count(index: str):  # noqa: ARG001
+    """Elasticsearch `_count`, used by the collector's startup connectivity check."""
+    return {
+        "count": 0,
+        "_shards": {"total": 1, "successful": 1, "skipped": 0, "failed": 0},
+    }
 
 
 # ---------------------------------------------------------------------------

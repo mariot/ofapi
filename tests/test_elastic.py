@@ -23,3 +23,10 @@ def test_elastic_search_alerts_returns_empty_hits():
     assert body["hits"]["hits"] == []
     assert body["hits"]["total"] == {"value": 0, "relation": "eq"}
     assert body["timed_out"] is False
+
+
+def test_elastic_count_answers_the_connectivity_check():
+    for method in ("get", "post"):
+        response = getattr(client, method)("/elastic/.alerts-security.alerts-*/_count")
+        assert response.status_code == 200
+        assert response.json()["count"] == 0
