@@ -11,6 +11,7 @@ injector under test:
 """
 
 import asyncio
+import gzip
 import itertools
 import json
 import re
@@ -24,7 +25,7 @@ from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-JOURNAL_SIZE = 5000
+JOURNAL_SIZE = 20000
 BODY_PREVIEW_LIMIT = 10_000
 SKIPPED_PREFIXES = ("/_control", "/docs", "/redoc", "/openapi.json")
 SENSITIVE_HEADER_PARTS = ("authorization", "cookie", "token", "key", "secret")
@@ -108,14 +109,26 @@ def _redact(headers: list[tuple[bytes, bytes]]) -> dict[str, str]:
     return redacted
 
 
-def _decode_body(body: bytes) -> Any:
+def _decode_body(body: bytes, encoding: str = "") -> Any:
     if not body:
         return None
+    if encoding.strip().lower() == "gzip":
+        try:
+            body = gzip.decompress(body)
+        except OSError:
+            pass
     text = body.decode("utf-8", errors="replace")
     try:
         return json.loads(text)
     except ValueError:
         return text[:BODY_PREVIEW_LIMIT]
+
+
+def _header(scope: Scope, name: bytes) -> str:
+    for raw_name, raw_value in scope.get("headers", []):
+        if raw_name.lower() == name:
+            return raw_value.decode("latin-1")
+    return ""
 
 
 def _step_response(step: Step) -> Response:
@@ -186,7 +199,7 @@ class ControlMiddleware:
                 "path": path,
                 "query": query,
                 "headers": _redact(scope.get("headers", [])),
-                "body": _decode_body(body),
+                "body": _decode_body(body, _header(scope, b"content-encoding")),
                 "status": status,
                 "rule_id": rule.id if rule else None,
                 "served_by": "rule" if step and not step.passthrough else "fake",

@@ -165,3 +165,12 @@ def test_graph_alerts_v2_still_serves_o365_alert_by_default():
     response = client.get(ALERTS, headers=AUTH)
     alert = response.json()["value"][0]
     assert alert["serviceSource"] == "microsoftDefenderForOffice365"
+
+
+def test_journal_shows_gzipped_bodies_decoded():
+    import gzip as gz
+
+    body = gz.compress(b'{"indicator": "198.51.100.1"}')
+    client.post("/sink/gz", content=body, headers={"Content-Encoding": "gzip"})
+    entry = client.get("/_control/journal", params={"path": "/sink/gz"}).json()[-1]
+    assert entry["body"] == {"indicator": "198.51.100.1"}
