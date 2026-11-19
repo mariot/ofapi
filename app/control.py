@@ -65,10 +65,15 @@ _journal: deque[dict] = deque(maxlen=JOURNAL_SIZE)
 _journal_ids = itertools.count(1)
 
 
-def reset() -> None:
+def reset(prefix: str = "") -> None:
+    """Forget the rules and journal entries under ``prefix`` (everything by default)."""
     with _lock:
-        _rules.clear()
+        _rules[:] = [
+            r for r in _rules if prefix and not r.path.lstrip("^").startswith(prefix)
+        ]
+        kept = [e for e in _journal if prefix and not e["path"].startswith(prefix)]
         _journal.clear()
+        _journal.extend(kept)
 
 
 def _matches(rule: Rule, method: str, path: str) -> bool:
@@ -244,6 +249,6 @@ async def clear_journal() -> None:
 
 
 @router.post("/reset", status_code=204)
-async def reset_all() -> None:
-    """Forget every rule and the journal."""
-    reset()
+async def reset_all(prefix: str = "") -> None:
+    """Forget every rule and the journal, or only those under a path ``prefix``."""
+    reset(prefix)

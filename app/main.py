@@ -1,6 +1,3 @@
-import gzip
-import io
-import json
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Annotated
@@ -11,9 +8,10 @@ from censys_platform import (
     ResponseEnvelopeHostAsset,
 )
 from fastapi import FastAPI, File, Form, Query, UploadFile
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response
 from pydantic import BaseModel
 
+from app import vendors
 from app.api.aws_ec2 import describe_instances_xml
 from app.api.aws_ec2 import error_xml as ec2_error_xml
 from app.api.aws_roles_anywhere import build_create_session_response
@@ -39,7 +37,6 @@ from app.api.crowdstrike import (
 from app.api.elastic import SearchResponse as ElasticSearchResponse
 from app.api.feedly import BundleFactory
 from app.api.google import GmailMessageFactory, GoogleTokenFactory
-from app.api.hunt_io import C2FeedFactory
 from app.api.llm import (
     AnthropicMessageFactory,
     ChatCompletionFactory,
@@ -106,29 +103,23 @@ from app.api.utils import remove_private_attributes
 from app.api.xtm_one import AgentsResponse, AuditLogsResponse
 from app.control import ControlMiddleware
 from app.control import router as control_router
-from app.vendors import routers as vendor_routers
 
 app = FastAPI()
 app.add_middleware(ControlMiddleware)
 app.include_router(control_router)
-for vendor_router in vendor_routers():
-    app.include_router(vendor_router)
+vendors.include_all(app)
 
 
-@app.get("/hunt-io/feeds/c2", tags=["Hunt-IO"], response_class=StreamingResponse)
-async def hunt_io_feeds_c2():
-    """Hunt-IO C2 Feed Endpoint
+@app.post("/_control/reload", tags=["Control"])
+async def reload_vendors() -> dict:
+    """Load vendor modules added or changed since start, keeping rules and journal."""
+    return {"reloaded": vendors.reload_into(app)}
 
-    Returns a gzipped stream of C2 feed data in JSON Lines format."""
-    c2_feed_batch = C2FeedFactory.create_batch(10)
-    json_data = "\n".join([json.dumps(item.to_dict()) for item in c2_feed_batch])
-    encoded = json_data.encode("utf-8")
-    gzip_buffer = io.BytesIO(gzip.compress(encoded))
-    return StreamingResponse(
-        gzip_buffer,
-        media_type="application/gzip",
-        headers={"Content-Type": "application/gzip"},
-    )
+
+@app.get("/_control/hosts", tags=["Control"])
+async def vendor_hosts() -> dict[str, str]:
+    """Real vendor hosts (fnmatch patterns) and the path prefix of their fake."""
+    return vendors.hosts()
 
 
 @app.get("/feedly/v3/enterprise/ioc", tags=["Feedly"])
@@ -1197,4 +1188,3 @@ async def aws_ec2(request: fastapi.Request):
         status_code=400,
         media_type="text/xml",
     )
-
