@@ -124,12 +124,13 @@ def _nvd_cve(cve_id: str, score: float | None, cwe: str | None) -> dict:
     return {"cve": cve}
 
 
+# CVE-2099-*: identifiers that cannot collide with real CVEs a platform may also hold
 def nvd_cves(start_index: int = 0, results_per_page: int = 2000) -> dict:
     """NVD CVE API 2.0 page: 2 CVEs with CVSS v3.1 and 1 without (skipped)."""
     vulnerabilities = [
-        _nvd_cve("CVE-2026-90001", 9.8, "CWE-79"),
-        _nvd_cve("CVE-2026-90002", 7.5, None),
-        _nvd_cve("CVE-2026-90003", None, "CWE-89"),
+        _nvd_cve("CVE-2099-90001", 9.8, "CWE-79"),
+        _nvd_cve("CVE-2099-90002", 7.5, None),
+        _nvd_cve("CVE-2099-90003", None, "CWE-89"),
     ]
     page = vulnerabilities[start_index : start_index + results_per_page]
     return {
