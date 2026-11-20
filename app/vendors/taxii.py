@@ -281,11 +281,9 @@ async def objects21(collection_id: str, request: Request) -> Response:
 def _page20(collection_id: str, query) -> list[dict]:
     key = (collection_id, "2.0")
     after = query.get("added_after")
-    if (
-        key not in _datasets
-        or after is None
-        or after < _datasets[key][0]["_date_added"]
-    ):
+    # A cursor is the X-TAXII-Date-Added-Last of a page: anything else starts a new run
+    cursors = {i["_date_added"] for i in _datasets.get(key, [])}
+    if after not in cursors:
         _datasets[key] = _dataset("2.0")
     items = [i for i in _datasets[key] if after is None or i["_date_added"] > after]
     return items[:PAGE_SIZE]
