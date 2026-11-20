@@ -8,13 +8,16 @@ The collection and IOC objects are recorded GTI payloads (``virustotal_samples.j
 placeholder data) whose dates are moved to the last hours on every answer. Other
 VirusTotal connectors can add their routes here."""
 
+import base64
 import copy
+import hashlib
 import json
 import re
 import time
 from pathlib import Path
+from urllib.parse import parse_qs
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Query, Request, Response
 
 from app.fake import fake
 from app.vendors.fixtures import _pdf, _report_text
@@ -306,6 +309,420 @@ async def dtm_alerts(since: str = Query("")) -> dict:  # noqa: ARG001
         ),
     ]
     return {"alerts": alerts}
+
+
+# --- Livehunt: hunting notifications (ioc_stream) and rulesets, read and written by the
+# virustotal-livehunt-notifications and virustotal-livehunt-rules connectors ---
+
+AV_ENGINES = ["Kaspersky", "Symantec", "Microsoft", "ESET-NOD32", "BitDefender"]
+RULESETS: dict[str, dict] = {}
+NOTIFICATIONS: dict[str, dict] = {}
+
+
+def _yara_rule(name: str) -> str:
+    return (
+        f'import "pe"\n\nrule {name} {{\n'
+        f'    meta:\n        author = "staticfire"\n'
+        f'        date = "{fake.date_between("-30d").isoformat()}"\n'
+        f'        description = "{fake.sentence()}"\n'
+        f'    strings:\n        $a = "{fake.word()}" ascii wide\n'
+        f"    condition:\n        uint16(0) == 0x5a4d and $a\n}}\n"
+    )
+
+
+def _ruleset(ruleset_id: str, name: str) -> dict:
+    now = int(time.time())
+    return {
+        "id": ruleset_id,
+        "type": "hunting_ruleset",
+        "links": {
+            "self": f"https://www.virustotal.com/api/v3/intelligence/"
+            f"hunting_rulesets/{ruleset_id}"
+        },
+        "attributes": {
+            "name": name,
+            "enabled": True,
+            "limit": 100,
+            "rules": _yara_rule(name),
+            "rule_names": [name],
+            "creation_date": now - 86400,
+            "modification_date": now - 3600,
+            "notification_emails": [],
+        },
+    }
+
+
+def _scan_results(malicious: int) -> dict:
+    results = {}
+    for engine in AV_ENGINES:
+        flagged = malicious > 0 and fake.boolean(70)
+        results[engine] = {
+            "category": "malicious" if flagged else "undetected",
+            "engine_name": engine,
+            "method": "blacklist",
+            "result": fake.malware_family() if flagged else None,
+        }
+    return results
+
+
+def _hunted_file(extension: str, malicious: int) -> dict:
+    sha256 = fake.sha256()
+    now = int(time.time())
+    name = f"{fake.word()}.{extension}"
+    return {
+        "id": sha256,
+        "type": "file",
+        "links": {"self": f"https://www.virustotal.com/api/v3/files/{sha256}"},
+        "attributes": {
+            "sha256": sha256,
+            "sha1": fake.sha1(),
+            "md5": fake.md5(),
+            "size": fake.random_int(20000, 900000),
+            "names": [name, f"{fake.word()}.{extension}"],
+            "meaningful_name": name,
+            "type_extension": extension,
+            "type_tag": "peexe" if extension == "exe" else "pedll",
+            "type_tags": ["executable", "windows", "pe"],
+            "tags": ["peexe", "64bits", "signed"],
+            "first_submission_date": now - 7200,
+            "last_submission_date": now - 3600,
+            "last_analysis_date": now - 3600,
+            "last_analysis_stats": {
+                "malicious": malicious,
+                "suspicious": 0,
+                "harmless": 0,
+                "undetected": 70 - malicious,
+                "timeout": 0,
+                "confirmed-timeout": 0,
+                "failure": 0,
+                "type-unsupported": 3,
+            },
+            "last_analysis_results": _scan_results(malicious),
+            "reputation": -10,
+        },
+    }
+
+
+def _notification(extension: str, malicious: int) -> dict:
+    """A file that matched a hunting ruleset, with the context of its notification."""
+    obj = _hunted_file(extension, malicious)
+    rule_name = f"staticfire_{fake.word()}_{fake.random_int(100, 999)}"
+    ruleset_id = str(fake.random_int(10**15, 10**16))
+    RULESETS[ruleset_id] = _ruleset(ruleset_id, rule_name)
+    notification_id = (
+        fake.bothify("?" * 8).lower() + "-" + str(fake.random_int(1, 10**6))
+    )
+    obj["context_attributes"] = {
+        "notification_id": notification_id,
+        "notification_date": int(time.time()) - 1800,
+        "origin": "hunting",
+        "hunting_info": {
+            "rule_name": rule_name,
+            "rule_tags": ["staticfire"],
+            "snippet": "",
+            "source_country": "FR",
+            "source_key": fake.sha1(),
+        },
+        "sources": [{"id": ruleset_id, "label": rule_name, "type": "hunting_ruleset"}],
+        "tags": [rule_name, "staticfire"],
+    }
+    NOTIFICATIONS[notification_id] = obj
+    return obj
+
+
+@router.get("/api/v3/ioc_stream")
+async def ioc_stream() -> dict:
+    """One page of hunting notifications: files, some below the connector's filters."""
+    objects = [
+        _notification("exe", 28),
+        _notification("dll", 17),
+        _notification("exe", 9),
+        _notification("exe", 2),
+        _notification("txt", 30),
+    ]
+    return {"data": objects, "meta": {"count": len(objects)}}
+
+
+@router.get("/api/v3/intelligence/hunting_rulesets")
+async def list_rulesets() -> dict:
+    data = list(RULESETS.values())
+    return {"data": data, "meta": {"count": len(data)}}
+
+
+@router.post("/api/v3/intelligence/hunting_rulesets")
+async def create_ruleset(body: dict) -> dict:
+    attributes = body["data"]["attributes"]
+    ruleset_id = str(fake.random_int(10**15, 10**16))
+    RULESETS[ruleset_id] = _ruleset(ruleset_id, attributes["name"])
+    RULESETS[ruleset_id]["attributes"].update(
+        rules=attributes["rules"], notification_emails=attributes["notification_emails"]
+    )
+    return {"data": RULESETS[ruleset_id]}
+
+
+@router.get("/api/v3/intelligence/hunting_rulesets/{ruleset_id}")
+async def get_ruleset(ruleset_id: str) -> dict:
+    ruleset = RULESETS.get(ruleset_id) or _ruleset(ruleset_id, f"rule_{ruleset_id}")
+    return {"data": ruleset}
+
+
+@router.delete("/api/v3/intelligence/hunting_rulesets/{ruleset_id}")
+async def delete_ruleset(ruleset_id: str) -> dict:
+    RULESETS.pop(ruleset_id, None)
+    return {}
+
+
+@router.post("/api/v3/intelligence/hunting_rulesets/{ruleset_id}/relationships/editors")
+async def add_editors(ruleset_id: str, body: dict) -> dict:  # noqa: ARG001
+    return {}
+
+
+@router.delete("/api/v3/intelligence/hunting_notifications/{notification_id}")
+async def delete_notification(notification_id: str) -> dict:
+    NOTIFICATIONS.pop(notification_id, None)
+    return {}
+
+
+@router.get("/api/v3/files/{sha256}/download")
+async def download_file(sha256: str) -> Response:  # noqa: ARG001
+    """The sample itself: a few bytes of a PE header."""
+    return Response(
+        b"MZ" + bytes(range(256)) * 8, media_type="application/octet-stream"
+    )
+
+
+@router.get("/api/v3/files/{sha256}/behaviour_mitre_trees")
+async def behaviour_trees(sha256: str) -> dict:
+    """The malware configuration the livehunt connector reads (domains, IPs, URLs)."""
+    return {
+        "data": {
+            "id": sha256,
+            "type": "file_behaviour_mitre_trees",
+            "attributes": {
+                "malware_configurations": {
+                    "domains": [fake.domain_name(), fake.domain_name()],
+                    "ips": [fake.ipv4_public(), fake.ipv6()],
+                    "urls": [fake.url()],
+                }
+            },
+        }
+    }
+
+
+# --- Enrichment: IOC reports (files, URLs, domains, IP addresses), uploads and their
+# analyses, read by the virustotal enrichment and virustotal-downloader connectors ---
+
+HASH_LENGTHS = {32, 40, 64}
+SEEN: set[str] = set()  # hashes and URL ids made known by an upload
+ANALYSES: dict[str, str] = {}
+
+
+def _not_found(response: Response, what: str) -> dict:
+    response.status_code = 404
+    return {"error": {"code": "NotFoundError", "message": f"{what} not found"}}
+
+
+def _gti_assessment() -> dict:
+    return {
+        "threat_score": {"value": fake.random_int(60, 95)},
+        "severity": {"value": "SEVERITY_HIGH"},
+        "verdict": {"value": "VERDICT_MALICIOUS"},
+        "contributing_factors": {"mandiant_confidence_score": 90},
+    }
+
+
+def _unseen_file(identifier: str) -> bool:
+    """Hashes starting with 00 are unknown to VirusTotal until uploaded."""
+    return identifier.startswith("00") and identifier not in SEEN
+
+
+def _file_report(identifier: str) -> dict:
+    obj = _hunted_file("exe", fake.random_int(15, 40))
+    attributes = obj["attributes"]
+    length = len(identifier)
+    if length == 64:
+        attributes["sha256"] = identifier
+    elif length == 40:
+        attributes["sha1"] = identifier
+    elif length == 32:
+        attributes["md5"] = identifier
+    obj["id"] = attributes["sha256"]
+    obj["links"]["self"] = f"https://www.virustotal.com/api/v3/files/{obj['id']}"
+    ruleset_id = str(fake.random_int(10**15, 10**16))
+    rule_name = f"staticfire_{fake.word()}_{fake.random_int(100, 999)}"
+    RULESETS[ruleset_id] = _ruleset(ruleset_id, rule_name)
+    attributes.update(
+        magic="PE32 executable (GUI) Intel 80386, for MS Windows",
+        type_description="Win32 EXE",
+        creation_date=int(time.time()) - 5 * 86400,
+        popular_threat_classification={
+            "suggested_threat_label": f"trojan.{fake.word()}/{fake.word()}",
+        },
+        signature_info={"verified": "Signed", "product": fake.word()},
+        gti_assessment=_gti_assessment(),
+        crowdsourced_yara_results=[
+            {
+                "ruleset_id": ruleset_id,
+                "ruleset_name": f"set_{rule_name}",
+                "rule_name": rule_name,
+                "author": fake.name(),
+                "description": fake.sentence(),
+                "source": "https://github.com/staticfire/rules",
+            }
+        ],
+    )
+    return obj
+
+
+def _ioc_report(kind: str, identifier: str, extra: dict | None = None) -> dict:
+    """A recorded sample of the kind, under the identifier asked."""
+    obj = _fresh(SAMPLES[IOC_ENDPOINTS[kind]])
+    obj["id"] = identifier
+    obj["links"]["self"] = f"https://www.virustotal.com/api/v3/{kind}/{identifier}"
+    obj["attributes"]["last_analysis_results"] = _scan_results(5)
+    obj["attributes"]["gti_assessment"] = _gti_assessment()
+    obj["attributes"].update(extra or {})
+    return obj
+
+
+def _b64_decode(value: str) -> str:
+    try:
+        return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4)).decode()
+    except ValueError:
+        return ""
+
+
+@router.get("/api/v3/files/{identifier}")
+async def get_file(identifier: str, response: Response) -> dict:
+    if len(identifier) not in HASH_LENGTHS:
+        return _not_found(response, "File")
+    if _unseen_file(identifier):
+        return _not_found(response, "File")
+    return {"data": _file_report(identifier)}
+
+
+@router.get("/api/v3/urls/{identifier}")
+async def get_url(identifier: str, response: Response) -> dict:
+    """URLs with ``unseen`` in them are unknown until submitted."""
+    if "unseen" in _b64_decode(identifier) and identifier not in SEEN:
+        return _not_found(response, "URL")
+    if "unseen" not in _b64_decode(identifier) and identifier not in SEEN:
+        decoded = _b64_decode(identifier)
+        if not decoded.startswith("http"):
+            return _not_found(response, "URL")
+    url = _b64_decode(identifier) or f"https://{fake.domain_name()}/dropper.exe"
+    return {
+        "data": _ioc_report("urls", identifier, {"last_final_url": url, "url": url})
+    }
+
+
+@router.get("/api/v3/domains/{identifier}")
+async def get_domain(identifier: str) -> dict:
+    return {"data": _ioc_report("domains", identifier)}
+
+
+@router.get("/api/v3/ip_addresses/{identifier}")
+async def get_ip(identifier: str) -> dict:
+    return {"data": _ioc_report("ip_addresses", identifier)}
+
+
+@router.get("/api/v3/{kind}/{identifier}/resolutions")
+async def resolutions(kind: str, identifier: str, cursor: str = "") -> dict:
+    """Domains seen on the address, newest first: two pages."""
+    page = 1 if not cursor else 2
+    now = int(time.time())
+    data = [
+        {
+            "id": f"{identifier}{fake.domain_name()}",
+            "type": "resolution",
+            "attributes": {
+                "host_name": fake.domain_name(),
+                "ip_address": identifier,
+                "date": now - 86400 * (page * 3 + n),
+                "resolver": "VirusTotal",
+            },
+        }
+        for n in range(3)
+    ]
+    path = f"/{kind}/{identifier}/resolutions"
+    body: dict = {"data": data, "meta": {"count": 6}, "links": {}}
+    if page == 1:
+        body["meta"]["cursor"] = "page2"
+        body["links"]["next"] = f"https://www.virustotal.com/api/v3{path}?cursor=page2"
+    return body
+
+
+@router.get("/api/v3/{kind}/{identifier}/last_serving_ip_address")
+async def last_serving_ip(kind: str, identifier: str) -> dict:  # noqa: ARG001
+    return {"data": _ioc_report("ip_addresses", fake.ipv4_public())}
+
+
+GTI_RELATIONSHIPS = {
+    "malware_families": "malware_family",
+    "threat_actors": "threat_actor",
+    "campaigns": "campaign",
+    "reports": "report",
+}
+
+
+@router.get("/api/v3/{kind}/{identifier}/{relationship}")
+async def gti_relationship(kind: str, identifier: str, relationship: str) -> dict:
+    """Collections linked to an IOC (the shared GTI samples)."""
+    if kind == "collections" or relationship not in GTI_RELATIONSHIPS:
+        return _page([], f"/{kind}/{identifier}/{relationship}")
+    objects = _of_type(GTI_RELATIONSHIPS[relationship].replace("_", "-"))
+    return _page(objects, f"/{kind}/{identifier}/{relationship}")
+
+
+@router.get("/api/v3/yara_rulesets/{ruleset_id}")
+async def get_yara_ruleset(ruleset_id: str) -> dict:
+    return await get_ruleset(ruleset_id)
+
+
+def _multipart_file(content_type: str, body: bytes) -> bytes:
+    """The content of the first file part of a multipart body."""
+    boundary = content_type.split("boundary=")[-1].strip('"').encode()
+    part = body.split(b"--" + boundary)[1]
+    return part.split(b"\r\n\r\n", 1)[1].removesuffix(b"\r\n")
+
+
+@router.post("/api/v3/files")
+async def upload_file(request: Request) -> dict:
+    """A sample submitted for analysis: its hashes become known."""
+    content = _multipart_file(request.headers["content-type"], await request.body())
+    SEEN.update({hashlib.sha256(content).hexdigest(), hashlib.md5(content).hexdigest()})
+    analysis_id = base64.b64encode(fake.md5().encode()).decode().rstrip("=")
+    ANALYSES[analysis_id] = "completed"
+    return {"data": {"type": "analysis", "id": analysis_id}}
+
+
+@router.post("/api/v3/urls")
+async def upload_url(request: Request) -> dict:
+    """A URL submitted for analysis: it becomes known under both of its ids."""
+    form = parse_qs((await request.body()).decode())
+    url = form.get("url", [""])[0]
+    SEEN.add(base64.urlsafe_b64encode(url.encode()).decode().rstrip("="))
+    SEEN.add(hashlib.sha256(url.encode()).hexdigest())
+    analysis_id = f"u-{hashlib.sha256(url.encode()).hexdigest()}-{int(time.time())}"
+    ANALYSES[analysis_id] = "completed"
+    return {"data": {"type": "analysis", "id": analysis_id}}
+
+
+@router.get("/api/v3/analyses/{analysis_id}")
+async def get_analysis(analysis_id: str) -> dict:
+    now = int(time.time())
+    return {
+        "data": {
+            "type": "analysis",
+            "id": analysis_id,
+            "attributes": {
+                "status": ANALYSES.get(analysis_id, "completed"),
+                "date": now,
+                "stats": {"malicious": 12, "harmless": 50, "undetected": 20},
+                "results": _scan_results(12),
+            },
+        }
+    }
 
 
 @router.get("/api/v3/{kind}/{object_id}")
