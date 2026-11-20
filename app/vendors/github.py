@@ -374,8 +374,6 @@ BUILTIN: dict[str, Callable[[], Repo]] = {
 def _repository(full_name: str) -> Repo | None:
     """The repository, from ``GITHUB_REPOS`` of the vendor modules or the built-ins."""
     key = full_name.lower()
-    if key in BUILT:
-        return BUILT[key]
     sources = [BUILTIN]
     for name, module in list(sys.modules.items()):
         if name.startswith("app.vendors.") and name != __name__:
@@ -385,8 +383,11 @@ def _repository(full_name: str) -> Repo | None:
     for source in reversed(sources):
         if key in source:
             made = source[key]
-            BUILT[key] = made() if callable(made) else made
-            return BUILT[key]
+            # Built once per definition: a reloaded module brings a new one
+            cached = f"{key}#{id(made)}"
+            if cached not in BUILT:
+                BUILT[cached] = made() if callable(made) else made
+            return BUILT[cached]
     return None
 
 

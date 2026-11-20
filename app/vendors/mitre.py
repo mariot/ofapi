@@ -39,7 +39,8 @@ def _common(kind: str, key: str, **fields) -> dict:
         "created": CREATED,
         "modified": MODIFIED,
         "created_by_ref": MITRE,
-        "object_marking_refs": [TLP_CLEAR, STATEMENT],
+        # as in ATT&CK's data: MITRE's statement only (stix2 rejects a TLP:CLEAR id)
+        "object_marking_refs": [STATEMENT],
         **fields,
     }
 
@@ -75,16 +76,7 @@ def _boilerplate() -> list[dict]:
             "modified": CREATED,
             "name": "The MITRE Corporation",
             "identity_class": "organization",
-            "object_marking_refs": [TLP_CLEAR],
-        },
-        {
-            "type": "marking-definition",
-            "id": TLP_CLEAR,
-            "spec_version": "2.1",
-            "created": "2022-10-01T00:00:00.000Z",
-            "name": "TLP:CLEAR",
-            "definition_type": "tlp",
-            "definition": {"tlp": "clear"},
+            "object_marking_refs": [STATEMENT],
         },
         {
             "type": "marking-definition",
