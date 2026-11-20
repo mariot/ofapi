@@ -11,6 +11,12 @@ Every GitHub host answers here and is told apart by the original host the proxy 
   branches, commits, tags, releases, zipball and tarball (PyGithub, REST clients).
 * ``raw.githubusercontent.com``: ``/<owner>/<repo>/<ref>/<path>``.
 * ``codeload.github.com``: ``/<owner>/<repo>/zip|tar.gz|legacy.zip/<ref>``.
+* release assets: ``api.github.com/repos/<owner>/<repo>/releases/assets/<id>`` answers
+  their metadata, or with ``Accept: application/octet-stream`` redirects (302) to the
+  storage host (``release-assets.githubusercontent.com``), which serves the bytes.
+
+``contents`` answers the raw file for ``Accept: application/vnd.github.raw+json`` (or
+``.raw``), as GitHub does.
 
 A repository is a ``Repo``: its files (path -> bytes), default branch, latest release
 tag and release assets. Built-in repositories are in ``BUILTIN``; another vendor module
@@ -46,8 +52,15 @@ HOSTS = [
     "api.github.com",
     "raw.githubusercontent.com",
     "codeload.github.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
 ]
 router = APIRouter(prefix="/github", tags=["GitHub"])
+# Where GitHub redirects a release asset download (a signed, short-lived URL)
+ASSET_STORAGE = (
+    "https://release-assets.githubusercontent.com/github-production-release-asset"
+)
+ASSET_HOSTS = ("objects.githubusercontent.com", "release-assets.githubusercontent.com")
 
 API = "https://api.github.com"
 RAW = "https://raw.githubusercontent.com"
@@ -472,8 +485,12 @@ def _children(repo: Repo, path: str) -> list[tuple[str, bool]]:
     return sorted(found.items())
 
 
-def _contents(full_name: str, repo: Repo, path: str, ref: str) -> Response:
+def _contents(
+    full_name: str, repo: Repo, path: str, ref: str, accept: str = ""
+) -> Response:
     path = path.strip("/")
+    if path in repo.files and "vnd.github.raw" in accept:
+        return Response(repo.files[path], media_type="application/vnd.github.raw")
     if path in repo.files:
         data = repo.files[path]
         item = _entry(full_name, repo, path, ref, is_dir=False)
@@ -552,6 +569,7 @@ def _release(full_name: str, repo: Repo) -> dict:
         "prerelease": False,
         "created_at": when,
         "published_at": when,
+        "url": f"{API}/repos/{full_name}/releases/1",
         "html_url": f"https://github.com/{full_name}/releases/tag/{repo.tag}",
         "zipball_url": f"{API}/repos/{full_name}/zipball/{repo.tag}",
         "tarball_url": f"{API}/repos/{full_name}/tarball/{repo.tag}",
@@ -633,7 +651,37 @@ def _git_http(full_name: str, repo: Repo, rest: str) -> Response:
     return Response(target.read_bytes(), media_type="application/octet-stream")
 
 
-def _api(parts: list[str], query: dict) -> Response:
+def _asset(full_name: str, repo: Repo, asset_id: str, accept: str) -> Response:
+    """A release asset: its metadata, or a redirect to its bytes on the storage host."""
+    assets = dict(enumerate(sorted(repo.assets), start=1))
+    if not asset_id.isdigit() or int(asset_id) not in assets:
+        return _not_found()
+    name = assets[int(asset_id)]
+    if "application/octet-stream" in accept:
+        signature = hashlib.sha256(f"{full_name}{asset_id}".encode()).hexdigest()
+        location = (
+            f"{ASSET_STORAGE}/{full_name}/{asset_id}"
+            f"?sp=r&sv=2018-11-09&sr=b&spr=https&sig={signature[:43]}"
+            f"&rscd=attachment%3B+filename%3D{name}"
+        )
+        return Response(status_code=302, headers={"Location": location})
+    release = _release(full_name, repo)
+    return JSONResponse(next(a for a in release["assets"] if a["name"] == name))
+
+
+def _stored_asset(parts: list[str]) -> Response:
+    """``/github-production-release-asset/<owner>/<repo>/<id>`` on the storage host."""
+    if len(parts) != 4 or parts[0] != "github-production-release-asset":
+        return _not_found()
+    repo = _repository(f"{parts[1]}/{parts[2]}")
+    assets = dict(enumerate(sorted(repo.assets), start=1)) if repo else {}
+    if not parts[3].isdigit() or int(parts[3]) not in assets:
+        return _not_found()
+    data = repo.assets[assets[int(parts[3])]]
+    return Response(data, media_type="application/octet-stream")
+
+
+def _api(parts: list[str], query: dict, accept: str = "") -> Response:
     if len(parts) < 3 or parts[0] != "repos":
         return _not_found()
     full_name = f"{parts[1]}/{parts[2]}"
@@ -646,7 +694,7 @@ def _api(parts: list[str], query: dict) -> Response:
         return JSONResponse(_repo_json(full_name, repo))
     match rest[0]:
         case "contents":
-            return _contents(full_name, repo, "/".join(rest[1:]), ref)
+            return _contents(full_name, repo, "/".join(rest[1:]), ref, accept)
         case "git" if rest[1:2] == ["trees"]:
             return JSONResponse(_tree(full_name, repo))
         case "git" if rest[1:2] == ["blobs"]:
@@ -697,6 +745,8 @@ def _api(parts: list[str], query: dict) -> Response:
                     }
                 ]
             )
+        case "releases" if rest[1:2] == ["assets"] and len(rest) == 3:
+            return _asset(full_name, repo, rest[2], accept)
         case "releases":
             release = _release(full_name, repo)
             if rest[1:2] == ["latest"] or rest[1:3] == ["tags", repo.tag]:
@@ -764,7 +814,9 @@ async def serve(path: str, request: Request) -> Response:
             host = "raw.githubusercontent.com"
     query = dict(request.query_params)
     if host == "api.github.com":
-        return _api(parts, query)
+        return _api(parts, query, request.headers.get("accept", ""))
+    if host in ASSET_HOSTS:
+        return _stored_asset(parts)
     if host == "raw.githubusercontent.com":
         return _raw(parts)
     if host == "codeload.github.com":
